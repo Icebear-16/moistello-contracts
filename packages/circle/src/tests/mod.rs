@@ -1,12 +1,3 @@
-mod test_allowlist;
-mod test_auction;
-mod test_contribute;
-mod test_exit;
-mod test_full_lifecycle;
-mod test_governance;
-mod test_join;
-mod test_migration;
-mod test_pause;
-mod test_payout;
-mod test_dispute;
-mod test_unauthorized;
+mod test_integration;
+mod test_stress;
+mod test_security_fixes;

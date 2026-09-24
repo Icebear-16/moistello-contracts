@@ -311,6 +311,7 @@ name = "circle"
 version = "0.1.0"
 dependencies = [
  "common",
+ "ed25519-dalek",
  "rand 0.8.6",
  "reputation-registry",
  "serde_json",
