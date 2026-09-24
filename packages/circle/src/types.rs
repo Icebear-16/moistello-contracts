@@ -14,8 +14,8 @@ pub struct Circle{pub id:Address,pub token:Address,pub name:String,pub organizer
 #[contracttype]#[derive(Clone,Debug)]pub struct AuctionBid{pub bidder:Address,pub discount_bips:u32,pub round:u32,pub timestamp:u64}
 #[contracttype]#[derive(Clone,Debug)]pub struct VoteEntry{pub voter:Address,pub vote_for:Address,pub round:u32,pub timestamp:u64}
 #[contracttype]#[derive(Clone,Debug)]pub struct DisputeEntry{pub raised_by:Address,pub evidence_hash:BytesN<32>,pub raised_at:u64,pub resolved_at:u64,pub resolution:u32,pub resolved_by:Address}
-#[contracttype]#[derive(Clone)]pub enum DataKey{Circle,Admin,Factory,Members,Contributions,Payouts,Bids,Votes,Dispute,FeeBps,Treasury,Allowlist,Token,Referrals,ReputationRegistry,OracleContract,FallbackOracle,MultisigAdmins,MultisigThreshold,OraclePubkey,OracleCache,MultisigApprovals}
-#[contracterror]#[derive(Debug,Clone,PartialEq,Eq)]pub enum CircleError{NotInitialized=1,NotActive=2,CircleFull=3,AlreadyMember=4,NotMember=5,InsufficientMoiScore=6,RoundNotCurrent=7,InvalidAmount=8,PaymentDeadlinePassed=9,MaxStrikesReached=10,NotOrganizer=11,ContractPaused=12,InvalidInviteCode=13,AuctionAlreadyResolved=14,VoteQuorumNotMet=15,AlreadyContributed=16,AlreadyVoted=17,AlreadyBidded=18,PayoutAlreadyExecuted=19,InvalidPayoutType=20,InvalidRound=21,ContributionMismatch=22,CircleNotFull=23,NotEnoughVotes=24,DisputeAlreadyRaised=25,NoActiveDispute=26,Unauthorized=27,InvalidBid=28,InvalidMemberStatus=29,EmptyPayoutOrder=30,CircleSizeExceedsTier=31,ContributionExceedsTier=32,VecAccessError=33,AllowlistNotPermitted=34,InsufficientContractBalance=35,SelfReferral=36,OracleUnavailable=37,NotImplemented=38,ZeroPayoutAmount=39,ContributionsExist=40,InvalidAddress=41,ZeroAddress=42,TxExpired=43,InvalidExpiryBound=44,MultisigThresholdNotMet=45,InvalidMultisigConfig=46,InvalidOracleSignature=47,WrongOracle=48,MultisigAlreadyApproved=49,MultisigNoApprovals=50}
+#[contracttype]#[derive(Clone)]pub enum DataKey{Circle,Admin,Factory,Members,Contributions,Payouts,Bids,Votes,Dispute,FeeBps,Treasury,Allowlist,Token,Referrals,ReputationRegistry,OracleContract,FallbackOracle,MultisigAdmins,MultisigThreshold,OraclePubkey,OracleCache,MultisigApprovals,Streaks,StreakBonusConfig,PendingResolution}
+#[contracterror]#[derive(Debug,Clone,PartialEq,Eq)]pub enum CircleError{NotInitialized=1,NotActive=2,CircleFull=3,AlreadyMember=4,NotMember=5,InsufficientMoiScore=6,RoundNotCurrent=7,InvalidAmount=8,PaymentDeadlinePassed=9,MaxStrikesReached=10,NotOrganizer=11,ContractPaused=12,InvalidInviteCode=13,AuctionAlreadyResolved=14,VoteQuorumNotMet=15,AlreadyContributed=16,AlreadyVoted=17,AlreadyBidded=18,PayoutAlreadyExecuted=19,InvalidPayoutType=20,InvalidRound=21,ContributionMismatch=22,CircleNotFull=23,NotEnoughVotes=24,DisputeAlreadyRaised=25,NoActiveDispute=26,Unauthorized=27,InvalidBid=28,InvalidMemberStatus=29,EmptyPayoutOrder=30,CircleSizeExceedsTier=31,ContributionExceedsTier=32,VecAccessError=33,AllowlistNotPermitted=34,InsufficientContractBalance=35,SelfReferral=36,OracleUnavailable=37,NotImplemented=38,ZeroPayoutAmount=39,ContributionsExist=40,InvalidAddress=41,ZeroAddress=42,TxExpired=43,InvalidExpiryBound=44,MultisigThresholdNotMet=45,InvalidMultisigConfig=46,InvalidOracleSignature=47,WrongOracle=48,MultisigAlreadyApproved=49,MultisigNoApprovals=50,NoPendingResolution=51,ResolutionTimelockActive=52,ResolutionChallenged=53,InvalidBonusPct=54}
 #[contracttype]#[derive(Clone,Debug)]pub struct MemberJoined{pub member:Address,pub position:u32}
 #[contracttype]#[derive(Clone,Debug)]pub struct ContributionRecorded{pub member:Address,pub round:u32,pub amount:i128,pub on_time:bool}
 #[contracttype]#[derive(Clone,Debug)]pub struct PayoutExecuted{pub recipient:Address,pub round:u32,pub amount:i128,pub fee:i128,pub payout_type:u32}
@@ -29,6 +29,10 @@ pub struct CircleCompleted{pub total_payouts:i128}
 #[contracttype]#[derive(Clone,Debug)]pub struct VoteCast{pub voter:Address,pub vote_for:Address,pub round:u32}
 #[contracttype]#[derive(Clone,Debug)]pub struct ReferralRegistered{pub referrer:Address,pub referred:Address,pub bonus_pct:u32}
 #[contracttype]#[derive(Clone,Debug)]pub struct OracleFallbackUsed{pub round:u32,pub primary_oracle:Address,pub fallback_oracle:Address}
+#[contracttype]#[derive(Clone,Debug)]pub struct DisputeResolutionProposed{pub admin:Address,pub resolution:u32,pub execute_after:u64}
+#[contracttype]#[derive(Clone,Debug)]pub struct DisputeResolutionChallenged{pub member:Address}
+#[contracttype]#[derive(Clone,Debug)]pub struct DisputeResolved{pub admin:Address,pub resolution:u32}
+#[contracttype]#[derive(Clone,Debug)]pub struct BatchExitExecuted{pub round:u32,pub exited_count:u32}
 #[contracttype]#[derive(Clone,Debug,PartialEq)]pub enum PayoutType{Random=0,Fixed=1,Auction=2,Vote=3}
 #[contracttype]#[derive(Clone,Debug,PartialEq)]pub enum CircleStatus{Pending=0,Active=1,Completed=2,Cancelled=3,Disputed=4}
 #[contracttype]#[derive(Clone,Debug,PartialEq)]pub enum MemberStatus{Active=0,Exited=1,Defaulted=2}
@@ -42,5 +46,12 @@ pub struct CircleCompleted{pub total_payouts:i128}
 /// Stored N-of-M admin configuration (#359). `None` (no storage entry) means
 /// single-admin mode — existing behaviour, unchanged.
 #[contracttype]#[derive(Clone,Debug)]pub struct MultisigConfig{pub admins:Vec<Address>,pub threshold:u32}
+/// Streak bonus configuration (#368). `bonus_pct` is basis points (0-10000)
+/// applied on top of the linear base+per-day bonus, all under checked math.
+#[contracttype]#[derive(Clone,Debug)]pub struct StreakBonusConfig{pub base_bonus:i128,pub multiplier_per_day:i128,pub bonus_pct:u32}
+/// Pending, timelocked dispute resolution (#364). `execute_after` is the
+/// ledger timestamp at/after which `execute_dispute_resolution` may apply it,
+/// unless a member challenges it first.
+#[contracttype]#[derive(Clone,Debug)]pub struct PendingDisputeResolution{pub resolution:u32,pub proposed_by:Address,pub proposed_at:u64,pub execute_after:u64,pub challenged:bool}
 
 

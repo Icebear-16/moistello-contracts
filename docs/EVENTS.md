@@ -1,0 +1,40 @@
+# Circle Contract Event Schema
+
+This document describes the events emitted by the `circle` contract and their
+topic layout, so off-chain indexers can subscribe to the fields they need
+without decoding every event body.
+
+Soroban events are published as `(topics, data)`. The first topic is always
+the emitting contract address. The remaining topics are indexed fields chosen
+for the query patterns indexers commonly need (e.g. "all contributions for a
+member", "all payouts for a round"). The event body (`data`) carries the full
+struct.
+
+| Event | Topics `(contract, symbol, ...)` | Data type | Common query |
+|---|---|---|---|
+| Member joined | `symbol_short!("joined")`, `member` | `MemberJoined { member, position }` | All join events for a member |
+| Contribution recorded | `symbol_short!("contrib")`, `member`, `round` | `ContributionRecorded { member, round, amount, on_time }` | All contributions for a member; all contributions in a round |
+| Payout executed | `symbol_short!("payout")`, `recipient`, `round`, `payout_type` | `PayoutExecuted { recipient, round, amount, fee, payout_type }` | All payouts for a round; all payouts of a given type; all payouts to a member |
+| Auction bid placed | `symbol_short!("bid")`, `bidder`, `round` | `AuctionBidPlaced { bidder, discount_bips, round }` | All bids for a round |
+| Vote cast | `symbol_short!("vote")`, `voter`, `round` | `VoteCast { voter, vote_for, round }` | All votes for a round |
+| Member exited | `symbol_short!("exited")`, `member` | `MemberExited { member, penalty }` | All exits for a member |
+| Member defaulted | `symbol_short!("default")`, `member`, `round` | `MemberDefaulted { member, strikes }` | All defaults for a member/round |
+| Circle cancelled | `symbol_short!("cancel")` | `CircleCancelled { circle_id, cancelled_by, cancelled_at }` | Cancellation for a specific circle contract |
+| Dispute raised | `symbol_short!("disputed")`, `member` | `DisputeRaised { member, evidence_hash }` | All disputes raised by a member |
+| Dispute resolution proposed | `symbol_short!("dis_prop")`, `admin` | `DisputeResolutionProposed { admin, resolution, execute_after }` | Pending resolutions awaiting timelock |
+| Dispute resolution challenged | `symbol_short!("dis_chal")`, `member` | `DisputeResolutionChallenged { member }` | Challenges raised against a pending resolution |
+| Dispute resolved | `symbol_short!("resolved")`, `admin` | `DisputeResolved { admin, resolution }` | Finalized dispute resolutions |
+| Referral registered | `symbol_short!("referral")`, `referrer` | `ReferralRegistered { referrer, referred, bonus_pct }` | All referrals by a referrer |
+| Batch exit executed | `symbol_short!("bat_exit")`, `round` | `BatchExitExecuted { round, exited_count, failed_count }` | Batch exit outcomes per round |
+
+## Notes for indexers
+
+- `member` / `recipient` / `bidder` / `voter` topics are `Address` values and
+  can be filtered directly by Soroban RPC `getEvents` topic filters.
+- `round` is a `u32` topic present on all per-round events, enabling a single
+  filter to reconstruct a full round's activity.
+- `payout_type` mirrors `Circle.payout_type` (`0` = Random, `1` = Fixed,
+  `2` = Auction, `3` = Vote) and is included on payout events so indexers can
+  aggregate payouts by strategy without loading circle state.
+- Every event still carries the full data struct in the event body; topics
+  are additive indexing hints, not a replacement for decoding the body.
