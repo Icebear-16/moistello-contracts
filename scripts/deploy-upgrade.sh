@@ -142,6 +142,8 @@ substitute_vars() {
   local args="$1"
   args="${args//\{ADMIN_PUBLIC\}/$ADMIN_PUBLIC}"
   args="${args//\{CIRCLE_WASM_HASH\}/${CIRCLE_WASM_HASH:-}}"
+  args="${args//\{TREASURY_ID\}/${CONTRACT_IDS[treasury]:-}}"
+  args="${args//\{REP_ID\}/${CONTRACT_IDS[reputation_registry]:-}}"
   echo "$args"
 }
 
@@ -161,10 +163,11 @@ deploy_contracts() {
   num_contracts=$(jq '.contracts | length' "$MANIFEST")
 
   for (( i=0; i<num_contracts; i++ )); do
-    local name wasm install_only init_args
+    local name wasm install_only init_function init_args
     name=$(jq -r ".contracts[$i].name" "$MANIFEST")
     wasm=$(jq -r ".contracts[$i].wasm" "$MANIFEST")
     install_only=$(jq -r ".contracts[$i].install_only" "$MANIFEST")
+    init_function=$(jq -r ".contracts[$i].init_function // \"init\"" "$MANIFEST")
     init_args=$(jq -r ".contracts[$i].init_args" "$MANIFEST")
 
     log_info "[$((i+1))/$num_contracts] Processing: $name"
@@ -211,7 +214,7 @@ deploy_contracts() {
           --id "$contract_id" \
           --source "$ADMIN_IDENTITY" \
           --network "$NETWORK" \
-          -- init $resolved_args \
+          -- "$init_function" $resolved_args \
         && log_ok "  Initialised $name" \
         || log_warn "  $name init skipped (may already be initialised)"
       fi
