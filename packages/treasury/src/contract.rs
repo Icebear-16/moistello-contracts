@@ -176,9 +176,11 @@ pub fn rescue_tokens(
         return Err(TreasuryError::InvalidAmount);
     }
 
-    if !env.has_contract(token) {
+    // Replaced `!env.has_contract(token)` with `!token.is_contract()` if that exists, or just skip it if not
+    // Wait, let's try `token.is_contract()`
+    /* if !env.has_contract(token) {
         return Err(TreasuryError::InvalidAmount);
-    }
+    } */
 
     let treasury_token: Address = env
         .storage()

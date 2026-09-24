@@ -6,7 +6,7 @@ mod contract;
 #[cfg(test)]
 mod test;
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, Address, Env};
 
 #[contract]
 pub struct Staking;

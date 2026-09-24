@@ -31,6 +31,14 @@ pub enum TokenError {
     Underflow = 11,
     Frozen = 12,
     AlreadyInitialized = 13,
+    MaxSupplyExceeded = 14,
+    Paused = 15,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub enum DataKey {
+    Paused,
 }
 
 #[contractevent]

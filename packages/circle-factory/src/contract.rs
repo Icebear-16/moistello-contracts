@@ -53,6 +53,8 @@ pub fn deploy_circle(env: &Env, config: &CircleConfig) -> Result<Address, Factor
     pause::when_not_paused(env).map_err(|_| FactoryError::ContractPaused)?;
     config.organizer.require_auth();
     if config.max_members < 2 || config.contribution_amount <= 0 || config.total_rounds == 0 || config.payout_type > 3 { return Err(FactoryError::InvalidConfig); }
+    if config.slug.len() == 0 { return Err(FactoryError::EmptySlug); }
+    if env.storage().persistent().has(&DataKey::Slug(config.slug.clone())) { return Err(FactoryError::DuplicateSlug); }
     let wh: BytesN<32> = env.storage().instance().get(&DataKey::WasmHash).ok_or(FactoryError::WasmHashNotSet)?;
     let count: u32 = env.storage().instance().get(&DataKey::CircleCount).unwrap_or(0);
     let mut salt = [0u8; 32];
@@ -61,6 +63,7 @@ pub fn deploy_circle(env: &Env, config: &CircleConfig) -> Result<Address, Factor
     let now = env.ledger().timestamp();
     let mut circles: Vec<CircleEntry> = env.storage().persistent().get(&DataKey::CircleList).unwrap_or_else(|| Vec::new(env));
     circles.push_back(CircleEntry { circle_id: cid.clone(), name: config.name.clone(), organizer: config.organizer.clone(), deployed_at: now, status: 0 });
+    env.storage().persistent().set(&DataKey::Slug(config.slug.clone()), &cid);
     env.storage().persistent().set(&DataKey::CircleConfig(cid.clone()), config);
     env.storage().persistent().set(&DataKey::CircleList, &circles);
     let c: u32 = env.storage().instance().get(&DataKey::CircleCount).unwrap_or(0);

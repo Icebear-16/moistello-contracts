@@ -31,9 +31,8 @@ pub fn initialize(
     Ok(())
 }
 
-pub fn transfer(
+pub fn transfer(env: &Env, from: &Address, to: &Address, amount: i128) -> Result<(), TokenError> {
     validate_not_paused(env)?;
-env: &Env, from: &Address, to: &Address, amount: i128) -> Result<(), TokenError> {
     from.require_auth();
     validate_non_frozen(env, from)?;
     validate_non_frozen(env, to)?;
@@ -76,14 +75,13 @@ pub fn unpause(env: &Env, admin: &Address) -> Result<(), TokenError> {
 }
 
 pub fn transfer_from(
-    validate_not_paused(env)?;
-
     env: &Env,
     spender: &Address,
     from: &Address,
     to: &Address,
     amount: i128,
 ) -> Result<(), TokenError> {
+    validate_not_paused(env)?;
     spender.require_auth();
     validate_non_frozen(env, from)?;
     validate_non_frozen(env, to)?;
@@ -186,9 +184,8 @@ pub fn decimals(env: &Env) -> u32 {
     meta.decimals
 }
 
-pub fn mint(
+pub fn mint(env: &Env, admin: &Address, to: &Address, amount: i128) -> Result<(), TokenError> {
     validate_not_paused(env)?;
-env: &Env, admin: &Address, to: &Address, amount: i128) -> Result<(), TokenError> {
     admin.require_auth();
     require_admin(env, admin)?;
     validate_non_frozen(env, to)?;
@@ -209,9 +206,8 @@ env: &Env, admin: &Address, to: &Address, amount: i128) -> Result<(), TokenError
     Ok(())
 }
 
-pub fn burn(
+pub fn burn(env: &Env, from: &Address, amount: i128) -> Result<(), TokenError> {
     validate_not_paused(env)?;
-env: &Env, from: &Address, amount: i128) -> Result<(), TokenError> {
     from.require_auth();
     validate_non_frozen(env, from)?;
     if amount <= 0 {
@@ -234,9 +230,8 @@ env: &Env, from: &Address, amount: i128) -> Result<(), TokenError> {
     Ok(())
 }
 
-pub fn clawback(
+pub fn clawback(env: &Env, admin: &Address, from: &Address, amount: i128) -> Result<(), TokenError> {
     validate_not_paused(env)?;
-env: &Env, admin: &Address, from: &Address, amount: i128) -> Result<(), TokenError> {
     admin.require_auth();
     require_admin(env, admin)?;
     if amount <= 0 {
