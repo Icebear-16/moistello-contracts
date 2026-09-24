@@ -49,5 +49,22 @@ pub use types::CircleError;
     pub fn set_fallback_oracle(env:Env,admin:Address,oracle:Address)->Result<(),types::CircleError>{contract::set_fallback_oracle(&env,&admin,&oracle)}
     pub fn get_oracle(env:Env)->Option<Address>{contract::get_oracle(&env)}
     pub fn get_fallback_oracle(env:Env)->Option<Address>{contract::get_fallback_oracle(&env)}
+    pub fn set_oracle_pubkey(env:Env,admin:Address,pubkey:BytesN<32>)->Result<(),types::CircleError>{contract::set_oracle_pubkey(&env,&admin,&pubkey)}
+    pub fn get_oracle_pubkey(env:Env)->Option<BytesN<32>>{contract::get_oracle_pubkey(&env)}
+    pub fn get_oracle_cache(env:Env)->Option<types::OracleCache>{contract::get_oracle_cache(&env)}
+    pub fn get_yield_rate(env:Env,round:u32)->Result<i128,types::CircleError>{contract::get_yield_rate(&env,round)}
+    pub fn check_oracle_source(env:Env,oracle:Address)->Result<(),types::CircleError>{contract::check_oracle_source(&env,&oracle)}
+    pub fn check_tx_expiry(env:Env,valid_until_ledger:u32)->Result<(),types::CircleError>{contract::check_tx_expiry(&env,valid_until_ledger)}
+    pub fn contribute_with_expiry(env:Env,member:Address,amount:i128,round:u32,valid_until_ledger:u32)->Result<(),types::CircleError>{contract::contribute_with_expiry(&env,&member,amount,round,valid_until_ledger)}
+    pub fn trigger_payout_with_expiry(env:Env,caller:Address,round:u32,valid_until_ledger:u32)->Result<(),types::CircleError>{contract::trigger_payout_with_expiry(&env,&caller,round,valid_until_ledger)}
+    pub fn configure_multisig(env:Env,admin:Address,admins:soroban_sdk::Vec<Address>,threshold:u32)->Result<(),types::CircleError>{contract::configure_multisig(&env,&admin,&admins,threshold)}
+    pub fn disable_multisig(env:Env,admin:Address)->Result<(),types::CircleError>{contract::disable_multisig(&env,&admin)}
+    pub fn get_multisig_config(env:Env)->Option<types::MultisigConfig>{contract::get_multisig_config(&env)}
+    pub fn approve_action(env:Env,approver:Address,action_id:BytesN<32>)->Result<(),types::CircleError>{contract::approve_action(&env,&approver,&action_id)}
+    pub fn get_action_approvals(env:Env,action_id:BytesN<32>)->soroban_sdk::Vec<Address>{contract::get_action_approvals(&env,&action_id)}
+    pub fn trigger_payout_multisig(env:Env,caller:Address,round:u32,action_id:BytesN<32>)->Result<(),types::CircleError>{contract::trigger_payout_multisig(&env,&caller,round,&action_id)}
+    pub fn set_fee_bps_multisig(env:Env,caller:Address,fee_bps:u32,action_id:BytesN<32>)->Result<(),types::CircleError>{contract::set_fee_bps_multisig(&env,&caller,fee_bps,&action_id)}
+    pub fn set_treasury_multisig(env:Env,caller:Address,treasury:Address,action_id:BytesN<32>)->Result<(),types::CircleError>{contract::set_treasury_multisig(&env,&caller,&treasury,&action_id)}
+    pub fn resolve_dispute_multisig(env:Env,caller:Address,resolution:u32,action_id:BytesN<32>)->Result<(),types::CircleError>{contract::resolve_dispute_multisig(&env,&caller,resolution,&action_id)}
 }
 
