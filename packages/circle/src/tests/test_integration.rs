@@ -3,6 +3,9 @@
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, String};
 
+use crate::Circle;
+use treasury::{Treasury, TreasuryClient};
+
 /// Integration test: factory deploys circle -> members join -> contribute -> trigger payout -> fee sent to treasury
 /// This test is currently a stub due to circular dependencies between contracts in the test environment.
 /// In production, these contracts are deployed separately and interact via cross-contract calls.
@@ -34,7 +37,7 @@ fn test_circle_lifecycle_with_fees() {
 
     let organizer = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
     // Deploy a real treasury contract (a bare address would trap on deposit_fee).
     let treasury_id = env.register(treasury::Treasury, ());
     let treasury_client = treasury::TreasuryClient::new(&env, &treasury_id);
@@ -60,11 +63,15 @@ fn test_circle_lifecycle_with_fees() {
 
     let admin = organizer.clone();
     let factory = Address::generate(&env);
-    let contract_id = env.register(crate::Circle, (&admin, &factory, &config));
+    let contract_id = env.register(Circle, (&admin, &factory, &config));
     let client = crate::CircleClient::new(&env, &contract_id);
 
-    // Configure circle with treasury and fee
-    client.set_treasury(&organizer, &treasury);
+    // Deploy and wire a real Treasury contract for fee collection
+    let treasury_id = env.register(Treasury, ());
+    let treasury_client = TreasuryClient::new(&env, &treasury_id);
+    treasury_client.init(&admin, &token);
+
+    client.set_treasury(&organizer, &treasury_id);
     client.set_fee_bps(&organizer, &50u32); // 0.5% fee
 
     // Members join
@@ -97,7 +104,7 @@ fn test_circle_lifecycle_with_fees() {
 
     // Verify treasury received the fee
     let token_client_regular = soroban_sdk::token::Client::new(&env, &token);
-    let treasury_balance = token_client_regular.balance(&treasury);
+    let treasury_balance = token_client_regular.balance(&treasury_id);
     assert!(treasury_balance > 0, "Treasury should have received fees");
 
     // Round 1: Repeat
@@ -118,7 +125,7 @@ fn test_circle_lifecycle_with_fees() {
     assert_eq!(final_status.current_round, 3u32);
 
     // Verify total fees accumulated
-    let final_treasury_balance = token_client_regular.balance(&treasury);
+    let final_treasury_balance = token_client_regular.balance(&treasury_id);
     assert_eq!(final_treasury_balance, final_status.total_fees);
     assert!(final_treasury_balance > 0);
 }

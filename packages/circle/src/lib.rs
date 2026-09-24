@@ -3,8 +3,8 @@
 // re-exported `load_round_details` from payout.rs) are caught at compile time
 // rather than silently emitting warnings that can be overlooked.
 #![deny(unused_imports)]
-mod types; mod contract; mod payout; mod oracle; #[cfg(test)] mod test; #[cfg(test)] mod tests;
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env};
+mod types; mod contract; mod payout; mod oracle; mod analytics; mod migration; #[cfg(test)] mod test; #[cfg(test)] mod tests;
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 
 pub use types::CircleError;
 
@@ -70,5 +70,12 @@ pub use types::CircleError;
     pub fn set_fee_bps_multisig(env:Env,caller:Address,fee_bps:u32,action_id:BytesN<32>)->Result<(),types::CircleError>{contract::set_fee_bps_multisig(&env,&caller,fee_bps,&action_id)}
     pub fn set_treasury_multisig(env:Env,caller:Address,treasury:Address,action_id:BytesN<32>)->Result<(),types::CircleError>{contract::set_treasury_multisig(&env,&caller,&treasury,&action_id)}
     pub fn resolve_dispute_multisig(env:Env,caller:Address,resolution:u32,action_id:BytesN<32>)->Result<(),types::CircleError>{contract::resolve_dispute_multisig(&env,&caller,resolution,&action_id)}
+    pub fn migrate(env:Env,caller:Address)->Result<(),types::CircleError>{migration::migrate(&env,&caller)}
+    pub fn verify_state(env:Env)->Result<(),types::CircleError>{migration::verify(&env)}
+    pub fn get_storage_version(env:Env)->u32{migration::current_version(&env)}
+    pub fn get_analytics(env:Env)->types::CircleAnalytics{analytics::load(&env)}
+    pub fn get_member_stats(env:Env,member:Address)->types::MemberStats{analytics::get_member_stats(&env,&member)}
+    pub fn get_all_member_stats(env:Env)->Vec<types::MemberStats>{analytics::get_all_member_stats(&env)}
+    pub fn get_last_join_attempt(env:Env,member:Address)->Option<types::JoinAttempt>{env.storage().persistent().get(&types::DataKey::JoinAttempt(member))}
 }
 

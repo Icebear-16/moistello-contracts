@@ -13,7 +13,7 @@ mod tests {
     }
 
     fn setup_token(env: &Env, admin: &Address) -> Address {
-        env.register_stellar_asset_contract(admin.clone())
+        env.register_stellar_asset_contract_v2(admin.clone()).address()
     }
 
     #[test]

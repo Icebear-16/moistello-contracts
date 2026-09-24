@@ -3,6 +3,31 @@
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env, String};
 
+use crate::Circle;
+use reputation_registry::types::DataKey as RepKey;
+
+fn register_circle_with_diamond_organizer(
+    env: &Env,
+    admin: &Address,
+    factory: &Address,
+    config: &crate::types::CircleConfig,
+) -> Address {
+    let contract_id = Address::generate(env);
+    // First registration with a tier-valid config so the contract instance exists
+    let mut seed_config = config.clone();
+    seed_config.max_members = 2;
+    env.register_at(&contract_id, Circle, (admin.clone(), factory.clone(), seed_config));
+    // Seed diamond score now that the instance exists
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&RepKey::MemberScore(config.organizer.clone()), &900u32);
+    });
+    // Re-register with the real config; constructor runs again and finds the seeded score
+    env.register_at(&contract_id, Circle, (admin.clone(), factory.clone(), config.clone()));
+    contract_id
+}
+
 /// Stress test: 5 members, 50 rounds
 /// Member count is capped at 5 because a fresh organizer is bronze tier
 /// (`max_circle_size` = 5); round count is uncapped so the 50-round
@@ -10,12 +35,14 @@ use soroban_sdk::{Address, Env, String};
 #[test]
 fn test_large_circle_100_members_50_rounds() {
     let env = Env::default();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
     env.mock_all_auths();
 
     // Configure for large circle
     let organizer = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let token = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
 
     let config = crate::types::CircleConfig {
         organizer: organizer.clone(),
@@ -36,7 +63,7 @@ fn test_large_circle_100_members_50_rounds() {
 
     let admin = organizer.clone();
     let factory = Address::generate(&env);
-    let contract_id = env.register(crate::Circle, (&admin, &factory, &config));
+    let contract_id = register_circle_with_diamond_organizer(&env, &admin, &factory, &config);
     let client = crate::CircleClient::new(&env, &contract_id);
 
     // 1. Join phase: 5 members
@@ -91,11 +118,13 @@ fn test_large_circle_100_members_50_rounds() {
 #[test]
 fn test_large_circle_random_payout() {
     let env = Env::default();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
     env.mock_all_auths();
 
     let organizer = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let token = env.register_stellar_asset_contract(token_admin);
+    let token = env.register_stellar_asset_contract_v2(token_admin).address();
 
     let config = crate::types::CircleConfig {
         organizer: organizer.clone(),
@@ -116,7 +145,7 @@ fn test_large_circle_random_payout() {
 
     let admin = organizer.clone();
     let factory = Address::generate(&env);
-    let contract_id = env.register(crate::Circle, (&admin, &factory, &config));
+    let contract_id = register_circle_with_diamond_organizer(&env, &admin, &factory, &config);
     let client = crate::CircleClient::new(&env, &contract_id);
 
     // Join 5 members
@@ -157,11 +186,13 @@ fn test_large_circle_random_payout() {
 #[test]
 fn test_storage_scaling_50_members_100_rounds() {
     let env = Env::default();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
     env.mock_all_auths();
 
     let organizer = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let token = env.register_stellar_asset_contract(token_admin);
+    let token = env.register_stellar_asset_contract_v2(token_admin).address();
 
     let config = crate::types::CircleConfig {
         organizer: organizer.clone(),
@@ -182,7 +213,7 @@ fn test_storage_scaling_50_members_100_rounds() {
 
     let admin = organizer.clone();
     let factory = Address::generate(&env);
-    let contract_id = env.register(crate::Circle, (&admin, &factory, &config));
+    let contract_id = register_circle_with_diamond_organizer(&env, &admin, &factory, &config);
     let client = crate::CircleClient::new(&env, &contract_id);
 
     // Join 5 members
@@ -223,11 +254,12 @@ fn test_storage_scaling_50_members_100_rounds() {
 #[test]
 fn test_max_member_boundary_enforcement() {
     let env = Env::default();
+    env.cost_estimate().disable_resource_limits();
     env.mock_all_auths();
 
     let organizer = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let token = env.register_stellar_asset_contract(token_admin);
+    let token = env.register_stellar_asset_contract_v2(token_admin).address();
 
     let config = crate::types::CircleConfig {
         organizer: organizer.clone(),
@@ -248,7 +280,7 @@ fn test_max_member_boundary_enforcement() {
 
     let admin = organizer.clone();
     let factory = Address::generate(&env);
-    let contract_id = env.register(crate::Circle, (&admin, &factory, &config));
+    let contract_id = register_circle_with_diamond_organizer(&env, &admin, &factory, &config);
     let client = crate::CircleClient::new(&env, &contract_id);
 
     // Join exactly 5 members

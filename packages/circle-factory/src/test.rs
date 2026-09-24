@@ -2,23 +2,32 @@
 
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, BytesN, Env};
+use std::sync::atomic::{AtomicU32, Ordering};
 use crate::{CircleFactory, CircleFactoryClient}; use crate::types::{CircleConfig, FactoryError};
 
 fn install_wasm_hash(env: &Env) -> BytesN<32> {
-    // Test fixture wasm shipped with soroban-sdk (valid Soroban contract
-    // wasm with metadata section). The factory only deploys it; the deployed
-    // contract is never invoked by the factory tests.
+    // Test fixture wasm: the circle contract built from this workspace
+    // (packages/circle-factory/test_wasm/contract.wasm). The factory invokes
+    // its constructor during deploy_v2, so the fixture must accept
+    // (admin, factory, config) constructor arguments.
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
     let wasm: &[u8] = include_bytes!("../test_wasm/contract.wasm");
     env.deployer().upload_contract_wasm(wasm)
 }
 
+static SLUG_COUNTER: AtomicU32 = AtomicU32::new(1);
+
 fn sample_config(env: &Env, organizer: &Address) -> CircleConfig {
+    let n = SLUG_COUNTER.fetch_add(1, Ordering::Relaxed);
+    // max_members stays within the bronze-tier circle size limit (5) enforced
+    // by the circle constructor for unscored organizers.
     CircleConfig {
         organizer: organizer.clone(),
         token: Address::generate(env),
         name: soroban_sdk::String::from_str(env, "Test Circle"),
         contribution_amount: 100i128,
-        max_members: 10u32,
+        max_members: 5u32,
         payout_type: 0u32,
         total_rounds: 5u32,
         contribution_deadline_seconds: 86400u64,
@@ -27,7 +36,7 @@ fn sample_config(env: &Env, organizer: &Address) -> CircleConfig {
         penalty_bps: 500u32,
         grace_period_seconds: 3600u64,
         max_strikes: 3u32,
-        slug: soroban_sdk::String::from_str(env, "test-circle"),
+        slug: soroban_sdk::String::from_str(env, &format!("test-circle-{n}")),
     }
 }
 
@@ -172,4 +181,185 @@ fn test_pause_unpause_blocks_deploy() {
 
     client.unpause(&admin);
     assert!(client.try_deploy_circle(&config).is_ok());
+}
+
+#[test]
+fn test_builtin_templates_present_after_init() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+    client.init(&admin, &500i128, &wh);
+
+    let templates = client.get_templates();
+    assert_eq!(templates.len(), 3);
+    let t1 = client.get_template(&1);
+    assert_eq!(t1.contribution_amount, 100_0000000);
+    assert_eq!(t1.max_members, 5);
+    assert_eq!(t1.payout_type, 1);
+    assert_eq!(t1.total_rounds, 5);
+    let t2 = client.get_template(&2);
+    assert_eq!(t2.max_members, 8);
+    let t3 = client.get_template(&3);
+    assert_eq!(t3.max_members, 12);
+}
+
+#[test]
+fn test_get_template_missing_returns_template_not_found() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    assert_eq!(
+        client.try_get_template(&99),
+        Err(Ok(FactoryError::TemplateNotFound))
+    );
+}
+
+#[test]
+fn test_create_template_success_and_duplicate() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    let mut t = client.get_template(&1);
+    t.id = 10;
+    t.name = soroban_sdk::String::from_str(&env, "Custom Weekly");
+    client.create_template(&admin, &t);
+    let templates = client.get_templates();
+    assert_eq!(templates.len(), 4);
+
+    let r = client.try_create_template(&admin, &t);
+    assert_eq!(r, Err(Ok(FactoryError::TemplateExists)));
+}
+
+#[test]
+fn test_create_template_rejects_unauthorized() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let outsider = Address::generate(&env);
+    let mut t = client.get_template(&1);
+    t.id = 11;
+    let r = client.try_create_template(&outsider, &t);
+    assert_eq!(r, Err(Ok(FactoryError::Unauthorized)));
+}
+
+#[test]
+fn test_create_template_rejects_invalid() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    let mut t = client.get_template(&1);
+    t.id = 12;
+    t.contribution_amount = 0;
+    let r = client.try_create_template(&admin, &t);
+    assert_eq!(r, Err(Ok(FactoryError::InvalidTemplate)));
+}
+
+#[test]
+fn test_deploy_from_template_success() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let organizer = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let circle_id = client.deploy_from_template(
+        &1,
+        &organizer,
+        &token,
+        &soroban_sdk::String::from_str(&env, "From Template"),
+        &soroban_sdk::String::from_str(&env, "from-template"),
+    );
+
+    assert_eq!(client.get_circle_count(), 1);
+    let cfg = client.get_circle_config(&circle_id);
+    assert_eq!(cfg.contribution_amount, 100_0000000);
+    assert_eq!(cfg.max_members, 5);
+    assert_eq!(cfg.payout_type, 1);
+    assert_eq!(cfg.total_rounds, 5);
+    assert_eq!(cfg.organizer, organizer);
+    assert_eq!(cfg.token, token);
+}
+
+#[test]
+fn test_deploy_from_template_missing_template() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let organizer = Address::generate(&env);
+    let token = Address::generate(&env);
+    let r = client.try_deploy_from_template(
+        &99,
+        &organizer,
+        &token,
+        &soroban_sdk::String::from_str(&env, "X"),
+        &soroban_sdk::String::from_str(&env, "x"),
+    );
+    assert_eq!(r, Err(Ok(FactoryError::TemplateNotFound)));
+}
+
+#[test]
+fn test_deploy_from_template_custom_within_bounds() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let mut config = sample_config(&env, &Address::generate(&env));
+    config.contribution_amount = 50_0000000;
+    config.max_members = 4;
+    config.slug = soroban_sdk::String::from_str(&env, "custom-ok");
+    let circle_id = client.deploy_from_template_custom(&1, &config);
+    assert_eq!(client.get_circle_count(), 1);
+    let stored = client.get_circle_config(&circle_id);
+    assert_eq!(stored.contribution_amount, 50_0000000);
+    assert_eq!(stored.max_members, 4);
+}
+
+#[test]
+fn test_deploy_from_template_custom_out_of_bounds() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let mut config = sample_config(&env, &Address::generate(&env));
+    config.max_members = 99;
+    config.slug = soroban_sdk::String::from_str(&env, "custom-oob");
+    let r = client.try_deploy_from_template_custom(&1, &config);
+    assert_eq!(r, Err(Ok(FactoryError::TemplateOutOfBounds)));
+}
+
+#[test]
+fn test_deploy_from_template_custom_amount_out_of_bounds() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let mut config = sample_config(&env, &Address::generate(&env));
+    config.contribution_amount = 0;
+    config.slug = soroban_sdk::String::from_str(&env, "custom-zero");
+    let r = client.try_deploy_from_template_custom(&1, &config);
+    assert_eq!(r, Err(Ok(FactoryError::TemplateOutOfBounds)));
+}
+
+#[test]
+fn test_migrate_circles_no_circles_returns_zero() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    assert_eq!(client.migrate_circles(&admin, &0, &10), 0);
+}
+
+#[test]
+fn test_migrate_circles_rejects_unauthorized() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let outsider = Address::generate(&env);
+    let r = client.try_migrate_circles(&outsider, &0, &10);
+    assert_eq!(r, Err(Ok(FactoryError::Unauthorized)));
+}
+
+#[test]
+fn test_migrate_circles_batch_counts_processed_circles() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    let org = Address::generate(&env);
+    client.deploy_circle(&sample_config(&env, &org));
+    client.deploy_circle(&sample_config(&env, &Address::generate(&env)));
+
+    // Circles are already at the current storage version, so each invoked
+    // migrate() resolves successfully and is counted as processed.
+    assert_eq!(client.migrate_circles(&admin, &0, &10), 2);
+    assert_eq!(client.migrate_circles(&admin, &0, &1), 1);
+    assert_eq!(client.migrate_circles(&admin, &1, &1), 1);
+    assert_eq!(client.migrate_circles(&admin, &5, &10), 0);
+    assert_eq!(client.migrate_circles(&admin, &0, &0), 0);
 }

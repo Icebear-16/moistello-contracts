@@ -317,13 +317,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "StakersList"
+                    "symbol": "StakerList"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
                 "vec": [
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  },
                   {
                     "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                   }

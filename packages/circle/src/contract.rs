@@ -3,6 +3,7 @@ use crate::oracle;
 // internal helper used only within payout.rs and must NOT be re-exported here;
 // doing so would create an unused import (fixes #271).
 use crate::payout;
+use crate::{analytics, migration};
 use crate::types::*;
 // Reentrancy protection comes from the shared common module — there is intentionally
 // no local reentrancy.rs in this package. See packages/common/src/reentrancy.rs for
@@ -207,6 +208,8 @@ pub fn init(
     env.storage()
         .persistent()
         .set(&DataKey::Votes, &Vec::<VoteEntry>::new(env));
+    analytics::save(env, &analytics::load(env));
+    migration::init_current_version(env);
     Ok(())
 }
 /// Allows a member to join an active circle.
@@ -223,6 +226,7 @@ pub fn init(
 /// - `Err(CircleError::AllowlistNotPermitted)` if allowlist is configured and member is not on it
 /// - `Err(CircleError::AlreadyMember)` if member has already joined
 /// - `Err(CircleError::CircleFull)` if max_members limit has been reached
+/// - `Err(CircleError::JoinRateLimited)` if member attempted join within JOIN_RATE_LIMIT_LEDGERS of prior attempt
 /// - `Err(CircleError::VecAccessError)` if vector access fails
 ///
 /// # Authorization
@@ -235,6 +239,24 @@ pub fn join(env: &Env, member: &Address) -> Result<(), CircleError> {
     let _guard = ReentrancyGuard::new(env).map_err(|_| CircleError::NotActive)?;
     validate_addr(env, member)?;
     member.require_auth();
+    let attempt_key = DataKey::JoinAttempt(member.clone());
+    if let Some(prev) = env
+        .storage()
+        .persistent()
+        .get::<DataKey, JoinAttempt>(&attempt_key)
+    {
+        let seq = env.ledger().sequence();
+        if seq.saturating_sub(prev.ledger) < JOIN_RATE_LIMIT_LEDGERS {
+            return Err(CircleError::JoinRateLimited);
+        }
+    }
+    env.storage().persistent().set(
+        &attempt_key,
+        &JoinAttempt {
+            ledger: env.ledger().sequence(),
+            timestamp: env.ledger().timestamp(),
+        },
+    );
     let mut circle: Circle = env
         .storage()
         .instance()
@@ -303,6 +325,7 @@ pub fn join(env: &Env, member: &Address) -> Result<(), CircleError> {
     }
     env.storage().instance().set(&DataKey::Circle, &circle);
     env.storage().persistent().set(&DataKey::Members, &members);
+    analytics::record_join(env, member, circle.member_count, now)?;
     env.events().publish(
         (env.current_contract_address(), symbol_short!("joined"), member.clone()),
         MemberJoined {
@@ -423,6 +446,7 @@ pub fn contribute(
     env.storage()
         .persistent()
         .set(&symbol_short!("contribs"), &contribution_map);
+    analytics::record_contribution(env, member, amount)?;
     env.events().publish(
         (env.current_contract_address(), symbol_short!("contrib"), member.clone(), round),
         ContributionRecorded {
@@ -596,6 +620,7 @@ fn trigger_payout_inner(env: &Env, caller: &Address, round: u32) -> Result<(), C
                     token_client.transfer(&circle.id, &m.address, &share);
                     distributed = math::safe_add(distributed, share)
                         .map_err(|_| CircleError::InvalidAmount)?;
+                    analytics::record_receipt(env, &m.address, share)?;
                     payouts.push_back(PayoutRecipient {
                         recipient: m.address.clone(),
                         round,
@@ -628,6 +653,7 @@ fn trigger_payout_inner(env: &Env, caller: &Address, round: u32) -> Result<(), C
     if distributed < net {
         let dust = math::safe_sub(net, distributed).map_err(|_| CircleError::InvalidAmount)?;
         token_client.transfer(&circle.id, &recipient, &dust);
+        analytics::record_receipt(env, &recipient, dust)?;
         payouts.push_back(PayoutRecipient {
             recipient: recipient.clone(),
             round,
@@ -660,6 +686,7 @@ fn trigger_payout_inner(env: &Env, caller: &Address, round: u32) -> Result<(), C
     env.storage().instance().set(&DataKey::Circle, &circle);
     env.storage().persistent().set(&DataKey::Payouts, &payouts);
     env.storage().persistent().set(&DataKey::Members, &members);
+    analytics::record_round_completed(env, &circle)?;
     env.events().publish(
         (env.current_contract_address(), symbol_short!("payout"), recipient.clone(), round, circle.payout_type),
         PayoutExecuted {
@@ -1075,13 +1102,18 @@ pub fn report_late(
         .persistent()
         .get(&DataKey::Members)
         .ok_or(CircleError::NotInitialized)?;
+    let mut newly_defaulted = false;
     for i in 0..members.len() {
         let mut m = members.get(i).ok_or(CircleError::VecAccessError)?;
         if m.address == *late_member {
+            if m.status == MEMBER_DEFAULTED {
+                continue;
+            }
             m.strikes = m.strikes.wrapping_add(1);
             m.strikes = m.strikes.checked_add(1).ok_or(CircleError::InvalidAmount)?;
             if m.strikes >= circle.max_strikes {
                 m.status = MEMBER_DEFAULTED;
+                newly_defaulted = true;
                 scoring::record_default(env, &m.address);
                 env.events().publish(
                     (env.current_contract_address(), symbol_short!("default"), late_member.clone(), round),
@@ -1095,6 +1127,9 @@ pub fn report_late(
         }
     }
     env.storage().persistent().set(&DataKey::Members, &members);
+    if newly_defaulted {
+        analytics::record_default(env, late_member)?;
+    }
     Ok(())
 }
 /// Cancels a pending circle before it starts and refunds any collected collateral.
@@ -1901,6 +1936,7 @@ pub fn batch_invite(
     env.storage()
         .instance()
         .set(&DataKey::Circle, &stored_circle);
+    analytics::sync_members(env, &members_vec, member_count)?;
     for mi in 0..members_vec.len() {
         let member = members_vec.get(mi).ok_or(CircleError::VecAccessError)?;
         env.events().publish(
@@ -1966,7 +2002,8 @@ pub fn batch_payout(
         .persistent()
         .get(&DataKey::Members)
         .ok_or(CircleError::NotInitialized)?;
-    
+    let mut total_net: i128 = 0;
+
     for i in 0..recipients.len() {
         let recipient = recipients.get(i).ok_or(CircleError::VecAccessError)?;
         validate_addr(env, &recipient)?;
@@ -1982,9 +2019,11 @@ pub fn batch_payout(
             0
         };
         let net_amount = amount - fee;
+        total_net = math::safe_add(total_net, net_amount).map_err(|_| CircleError::InvalidAmount)?;
 
         // Transfer net amount to recipient
         token_client.transfer(&circle.id, &recipient, &net_amount);
+        analytics::record_receipt(env, &recipient, net_amount)?;
 
         // Transfer fee to treasury if fee > 0
         if fee > 0 {
@@ -2026,6 +2065,10 @@ pub fn batch_payout(
     }
     env.storage().persistent().set(&DataKey::Payouts, &payouts);
     env.storage().persistent().set(&DataKey::Members, &members);
+    circle.total_payouts =
+        math::safe_add(circle.total_payouts, total_net).map_err(|_| CircleError::InvalidAmount)?;
+    env.storage().instance().set(&DataKey::Circle, &circle);
+    analytics::record_payout_total(env, &circle)?;
     Ok(())
 }
 /// Exits multiple members from the circle in a single atomic call (#365),

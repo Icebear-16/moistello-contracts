@@ -1,5 +1,5 @@
 #![cfg_attr(not(test), no_std)]
-mod types;mod contract;mod storage;pub mod scoring;#[cfg(test)]mod test;
+pub mod types;mod contract;mod storage;pub mod scoring;#[cfg(test)]mod test;
 use soroban_sdk::{contract,contractimpl,Address,Env};
 #[contract]pub struct ReputationRegistry;
 #[contractimpl]impl ReputationRegistry{

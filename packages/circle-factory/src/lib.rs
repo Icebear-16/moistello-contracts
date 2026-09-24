@@ -13,6 +13,12 @@ impl CircleFactory {
     pub fn set_fee_config(env: Env, admin: Address, fee_bps: i128) -> Result<(), types::FactoryError> { contract::set_fee_config(&env, &admin, fee_bps) }
     pub fn pause(env: Env, admin: Address) -> Result<(), types::FactoryError> { contract::pause(&env, &admin) }
     pub fn unpause(env: Env, admin: Address) -> Result<(), types::FactoryError> { contract::unpause(&env, &admin) }
+    pub fn get_templates(env: Env) -> soroban_sdk::Vec<types::CircleTemplate> { contract::get_templates(&env) }
+    pub fn get_template(env: Env, template_id: u32) -> Result<types::CircleTemplate, types::FactoryError> { contract::get_template(&env, template_id) }
+    pub fn create_template(env: Env, admin: Address, template: types::CircleTemplate) -> Result<(), types::FactoryError> { contract::create_template(&env, &admin, &template) }
+    pub fn deploy_from_template(env: Env, template_id: u32, organizer: Address, token: Address, name: soroban_sdk::String, slug: soroban_sdk::String) -> Result<Address, types::FactoryError> { contract::deploy_from_template(&env, template_id, &organizer, &token, name, slug) }
+    pub fn deploy_from_template_custom(env: Env, template_id: u32, config: types::CircleConfig) -> Result<Address, types::FactoryError> { contract::deploy_from_template_custom(&env, template_id, &config) }
+    pub fn migrate_circles(env: Env, caller: Address, start_index: u32, limit: u32) -> Result<u32, types::FactoryError> { contract::migrate_circles(&env, &caller, start_index, limit) }
 }
 
 #[cfg(test)]

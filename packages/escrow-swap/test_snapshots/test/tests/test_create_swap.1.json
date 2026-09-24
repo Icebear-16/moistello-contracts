@@ -316,98 +316,103 @@
               },
               "durability": "persistent",
               "val": {
-                "vec": [
+                "map": [
                   {
-                    "map": [
-                      {
-                        "key": {
-                          "symbol": "created_at"
+                    "key": {
+                      "u64": "0"
+                    },
+                    "val": {
+                      "map": [
+                        {
+                          "key": {
+                            "symbol": "created_at"
+                          },
+                          "val": {
+                            "u64": "0"
+                          }
                         },
-                        "val": {
-                          "u64": "0"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "hash_lock"
+                        {
+                          "key": {
+                            "symbol": "hash_lock"
+                          },
+                          "val": {
+                            "bytes": "72cd6e8422c407fb6d098690f1130b7ded7ec2f7f5e1d30bd9d521f015363793"
+                          }
                         },
-                        "val": {
-                          "bytes": "72cd6e8422c407fb6d098690f1130b7ded7ec2f7f5e1d30bd9d521f015363793"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "id"
+                        {
+                          "key": {
+                            "symbol": "id"
+                          },
+                          "val": {
+                            "u64": "0"
+                          }
                         },
-                        "val": {
-                          "u64": "0"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "initiator"
+                        {
+                          "key": {
+                            "symbol": "initiator"
+                          },
+                          "val": {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                          }
                         },
-                        "val": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "initiator_amount"
+                        {
+                          "key": {
+                            "symbol": "initiator_amount"
+                          },
+                          "val": {
+                            "i128": "1000000000"
+                          }
                         },
-                        "val": {
-                          "i128": "1000000000"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "responder"
+                        {
+                          "key": {
+                            "symbol": "responder"
+                          },
+                          "val": {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                          }
                         },
-                        "val": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "responder_amount"
+                        {
+                          "key": {
+                            "symbol": "responder_amount"
+                          },
+                          "val": {
+                            "i128": "2000000000"
+                          }
                         },
-                        "val": {
-                          "i128": "2000000000"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "status"
+                        {
+                          "key": {
+                            "symbol": "status"
+                          },
+                          "val": {
+                            "u32": 0
+                          }
                         },
-                        "val": {
-                          "u32": 0
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "time_lock"
+                        {
+                          "key": {
+                            "symbol": "time_lock"
+                          },
+                          "val": {
+                            "u64": "3600"
+                          }
                         },
-                        "val": {
-                          "u64": "3600"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "token_a"
+                        {
+                          "key": {
+                            "symbol": "token_a"
+                          },
+                          "val": {
+                            "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
+                          }
                         },
-                        "val": {
-                          "address": "CBUSYNQKASUYFWYC3M2GUEDMX4AIVWPALDBYJPNK6554BREHTGZ2IUNF"
+                        {
+                          "key": {
+                            "symbol": "token_b"
+                          },
+                          "val": {
+                            "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
+                          }
                         }
-                      },
-                      {
-                        "key": {
-                          "symbol": "token_b"
-                        },
-                        "val": {
-                          "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
-                        }
-                      }
-                    ]
+                      ]
+                    }
                   }
                 ]
               }
