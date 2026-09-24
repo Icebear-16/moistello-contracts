@@ -969,6 +969,15 @@ pub fn cancel_circle(env: &Env, caller: &Address) -> Result<(), CircleError> {
         return Err(CircleError::NotActive);
     }
 
+    let contributions: Vec<Contribution> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Contributions)
+        .unwrap_or_else(|| Vec::new(env));
+    if contributions.len() > 0 {
+        return Err(CircleError::ContributionsExist);
+    }
+
     let members: Vec<Member> = env
         .storage()
         .persistent()
