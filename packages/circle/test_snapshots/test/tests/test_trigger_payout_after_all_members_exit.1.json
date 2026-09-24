@@ -1116,51 +1116,6 @@
                     "symbol": "input_seed"
                   },
                   "val": {
-                    "u32": 0
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "vrf_output"
-                  },
-                  "val": {
-                    "u32": 2187052202
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "vrf_evaluated"
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "counter"
-                  },
-                  "val": {
-                    "u32": 1
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "input_seed"
-                  },
-                  "val": {
                     "u32": 1
                   }
                 },
@@ -1169,7 +1124,7 @@
                     "symbol": "vrf_output"
                   },
                   "val": {
-                    "u32": 2846537071
+                    "u32": 4258895342
                   }
                 }
               ]
