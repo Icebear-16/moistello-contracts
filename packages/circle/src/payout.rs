@@ -65,8 +65,14 @@ pub fn resolve_auction(env:&Env,circle:&Circle,round:u32)->Result<(Address,u32),
 pub fn resolve_vote(env:&Env,circle:&Circle,round:u32)->Result<Address,CircleError>{
     let votes:Vec<VoteEntry>=env.storage().persistent().get(&DataKey::Votes).unwrap_or_else(||Vec::new(env));
     let members:Vec<Member>=env.storage().persistent().get(&DataKey::Members).ok_or(CircleError::NotInitialized)?;
-    let active=count_active(env)?;
-    let quorum=(active/2)+1;
+    let mut active_positions:Map<Address,u32>=Map::new(env);
+    for i in 0..members.len(){
+        let m=members.get(i).ok_or(CircleError::VecAccessError)?;
+        if m.status==MEMBER_ACTIVE{
+            active_positions.set(m.address.clone(),m.position);
+        }
+    }
+    let quorum=(active_positions.len()/2)+1;
     let mut tally:Map<Address,u32>=Map::new(env);
     let mut match_count:u32=0;
     for i in 0..votes.len(){
@@ -79,31 +85,21 @@ pub fn resolve_vote(env:&Env,circle:&Circle,round:u32)->Result<Address,CircleErr
     }
     if match_count<quorum{return Err(CircleError::VoteQuorumNotMet);}
     let mut best_addr:Option<Address>=None;
+    let mut best_position:Option<u32>=None;
     let mut best_count:u32=0;
     for(addr,count)in tally.iter(){
-        if count>best_count{best_count=count;best_addr=Some(addr);}
-    }
-    let winner=best_addr.ok_or(CircleError::VoteQuorumNotMet)?;
-    for i in 0..members.len(){
-        let m=members.get(i).ok_or(CircleError::VecAccessError)?;
-        if m.address==winner{
-            if bitmap::is_set(circle.payout_bitmap, m.position).map_err(|_| CircleError::InvalidAmount)? {
-                return Err(CircleError::PayoutAlreadyExecuted);
-            }
-            return Ok(winner);
+        let position=match active_positions.get(addr.clone()){Some(p)=>p,None=>continue};
+        if count>best_count{
+            best_count=count;
+            best_addr=Some(addr);
+            best_position=Some(position);
         }
     }
-    Err(CircleError::NotMember)
-}
-
-fn count_active(env:&Env)->Result<u32,CircleError>{
-    let members:Vec<Member>=env.storage().persistent().get(&DataKey::Members).ok_or(CircleError::NotInitialized)?;
-    let mut c:u32=0;
-    for i in 0..members.len(){
-        if members.get(i).ok_or(CircleError::NotInitialized)?.status==MEMBER_ACTIVE{
-            c=c.checked_add(1).ok_or(CircleError::InvalidAmount)?;
-        }
+    let winner=best_addr.ok_or(CircleError::NotMember)?;
+    let position=best_position.ok_or(CircleError::NotMember)?;
+    if bitmap::is_set(circle.payout_bitmap,position).map_err(|_| CircleError::InvalidAmount)? {
+        return Err(CircleError::PayoutAlreadyExecuted);
     }
-    Ok(c)
+    Ok(winner)
 }
 
