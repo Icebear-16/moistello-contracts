@@ -23,13 +23,14 @@ struct.
 | Dispute raised | `symbol_short!("disputed")`, `member` | `DisputeRaised { member, evidence_hash }` | All disputes raised by a member |
 | Dispute resolution proposed | `symbol_short!("dis_prop")`, `admin` | `DisputeResolutionProposed { admin, resolution, execute_after }` | Pending resolutions awaiting timelock |
 | Dispute resolution challenged | `symbol_short!("dis_chal")`, `member` | `DisputeResolutionChallenged { member }` | Challenges raised against a pending resolution |
+| Dispute window extended | `symbol_short!("dis_ext")`, `challenger` | `DisputeWindowExtended { challenger, extension_seconds, new_execute_after }` | Window extensions requested by a challenger |
 | Dispute resolved | `symbol_short!("resolved")`, `admin` | `DisputeResolved { admin, resolution }` | Finalized dispute resolutions |
 | Referral registered | `symbol_short!("referral")`, `referrer` | `ReferralRegistered { referrer, referred, bonus_pct }` | All referrals by a referrer |
 | Batch exit executed | `symbol_short!("bat_exit")`, `round` | `BatchExitExecuted { round, exited_count, failed_count }` | Batch exit outcomes per round |
 
 ## Notes for indexers
 
-- `member` / `recipient` / `bidder` / `voter` topics are `Address` values and
+- `member` / `recipient` / `bidder` / `voter` / `challenger` topics are `Address` values and
   can be filtered directly by Soroban RPC `getEvents` topic filters.
 - `round` is a `u32` topic present on all per-round events, enabling a single
   filter to reconstruct a full round's activity.
@@ -38,3 +39,23 @@ struct.
   aggregate payouts by strategy without loading circle state.
 - Every event still carries the full data struct in the event body; topics
   are additive indexing hints, not a replacement for decoding the body.
+
+---
+
+# Factory Contract Event Schema
+
+This document describes the events emitted by the `circle-factory` contract and their
+topic layout for off-chain indexers.
+
+| Event | Topics `(contract, symbol, ...)` | Data type | Common query |
+|---|---|---|---|
+| Circle created | `symbol_short!("created")` | `CircleCreated { address, admin, token, timestamp }` | All created circles with canonical address, initial admin, and token |
+| Circle deployed | `symbol_short!("deploy")` | `CircleDeployed { creator, circle_id, name }` | Deployed circles by creator and name |
+| Template created | `symbol_short!("tmpl_new")` | `TemplateCreated { id, name }` | New circle templates |
+| Template deployed | `symbol_short!("tmpl_dep")` | `TemplateDeployed { template_id, circle_id, creator }` | Deployments from templates |
+| Fee config updated | `symbol_short!("fee_cfg")` | `FeeConfigUpdated { old_fee_bps, new_fee_bps, updated_by }` | Factory fee updates |
+| Migration batch progress | `symbol_short!("mig_batch")` | `MigrationBatchProgress { migrated, start_index }` | Batch circle migration progress |
+
+## Notes for factory indexers
+
+- `CircleCreated` carries canonical deployed `address`, initial `admin`, payment `token`, and block `timestamp`, allowing indexers to correlate circles without relying on transaction sequence numbers.

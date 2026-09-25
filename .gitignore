@@ -2,6 +2,7 @@
 **/*.rs.bk
 *.pem
 *.wasm
+!packages/circle-factory/test_wasm/*.wasm
 *.optimized.wasm
 .env
 config/keys/

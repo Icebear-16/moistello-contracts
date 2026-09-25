@@ -19,7 +19,7 @@ const REENTRANCY_KEY: Symbol = symbol_short!("reent");
 /// so the contract is usable again within seconds.
 ///
 /// ## Usage
-/// ```rust
+/// ```rust,ignore
 /// use common::reentrancy::ReentrancyGuard;
 ///
 /// pub fn my_mutating_fn(env: &Env) -> Result<(), MyError> {

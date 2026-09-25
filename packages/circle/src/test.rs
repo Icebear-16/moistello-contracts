@@ -720,7 +720,119 @@ mod tests {
         mint_tokens(&env, &token, &other, 100000_0000000); client.try_join(&other).unwrap().unwrap();        client.try_raise_dispute(&member, &evidence_hash).unwrap().unwrap();
 
         assert!(client.try_resolve_dispute(&admin, &1u32).is_ok()); // RESOLVE_DISMISS = 1
+        env.ledger().set_timestamp(env.ledger().timestamp() + 24 * 60 * 60);
+        client.execute_dispute_resolution();
         assert_eq!(client.get_status().status, 1u32);
+    }
+
+    #[test]
+    fn test_extend_dispute_window_happy_path() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 2u32;
+        let admin = config.organizer.clone();
+        let (token, client) = setup_test_env(&env, &mut config);
+
+        let member = Address::generate(&env);
+        let other = Address::generate(&env);
+        let evidence_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+
+        env.mock_all_auths();
+        mint_tokens(&env, &token, &member, 100000_0000000); client.try_join(&member).unwrap().unwrap();
+        mint_tokens(&env, &token, &other, 100000_0000000); client.try_join(&other).unwrap().unwrap();
+        client.try_raise_dispute(&member, &evidence_hash).unwrap().unwrap();
+
+        let t0 = env.ledger().timestamp();
+        assert!(client.try_resolve_dispute(&admin, &1u32).is_ok());
+
+        // Challenger extends dispute window by 12 hours (43200 seconds)
+        let ext_seconds: u64 = 12 * 3600;
+        let new_exec = client.extend_dispute_window(&member, &ext_seconds);
+        assert_eq!(new_exec, t0 + 24 * 3600 + ext_seconds);
+
+        // At 25 hours (which would have been elapsed originally), execution is still blocked
+        env.ledger().set_timestamp(t0 + 25 * 3600);
+        assert_eq!(client.try_execute_dispute_resolution(), Err(Ok(CircleError::ResolutionTimelockActive)));
+
+        // At 37 hours, new extended window has elapsed, execution succeeds
+        env.ledger().set_timestamp(t0 + 37 * 3600);
+        assert!(client.try_execute_dispute_resolution().is_ok());
+        assert_eq!(client.get_status().status, 1u32);
+    }
+
+    #[test]
+    fn test_extend_dispute_window_rejects_non_member() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 2u32;
+        let admin = config.organizer.clone();
+        let (token, client) = setup_test_env(&env, &mut config);
+
+        let member = Address::generate(&env);
+        let other = Address::generate(&env);
+        let outsider = Address::generate(&env);
+        let evidence_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+
+        env.mock_all_auths();
+        mint_tokens(&env, &token, &member, 100000_0000000); client.try_join(&member).unwrap().unwrap();
+        mint_tokens(&env, &token, &other, 100000_0000000); client.try_join(&other).unwrap().unwrap();
+        client.try_raise_dispute(&member, &evidence_hash).unwrap().unwrap();
+        client.try_resolve_dispute(&admin, &1u32).unwrap().unwrap();
+
+        let res = client.try_extend_dispute_window(&outsider, &3600);
+        assert_eq!(res, Err(Ok(CircleError::NotMember)));
+    }
+
+    #[test]
+    fn test_extend_dispute_window_rejects_invalid_amount() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 2u32;
+        let admin = config.organizer.clone();
+        let (token, client) = setup_test_env(&env, &mut config);
+
+        let member = Address::generate(&env);
+        let other = Address::generate(&env);
+        let evidence_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+
+        env.mock_all_auths();
+        mint_tokens(&env, &token, &member, 100000_0000000); client.try_join(&member).unwrap().unwrap();
+        mint_tokens(&env, &token, &other, 100000_0000000); client.try_join(&other).unwrap().unwrap();
+        client.try_raise_dispute(&member, &evidence_hash).unwrap().unwrap();
+        client.try_resolve_dispute(&admin, &1u32).unwrap().unwrap();
+
+        // 0 seconds rejected
+        let res_zero = client.try_extend_dispute_window(&member, &0);
+        assert_eq!(res_zero, Err(Ok(CircleError::InvalidAmount)));
+
+        // > 7 days (8 days = 8 * 86400) rejected
+        let res_too_large = client.try_extend_dispute_window(&member, &(8 * 86400));
+        assert_eq!(res_too_large, Err(Ok(CircleError::InvalidAmount)));
+    }
+
+    #[test]
+    fn test_extend_dispute_window_rejects_after_expiry() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 2u32;
+        let admin = config.organizer.clone();
+        let (token, client) = setup_test_env(&env, &mut config);
+
+        let member = Address::generate(&env);
+        let other = Address::generate(&env);
+        let evidence_hash: BytesN<32> = BytesN::from_array(&env, &[1u8; 32]);
+
+        env.mock_all_auths();
+        mint_tokens(&env, &token, &member, 100000_0000000); client.try_join(&member).unwrap().unwrap();
+        mint_tokens(&env, &token, &other, 100000_0000000); client.try_join(&other).unwrap().unwrap();
+        client.try_raise_dispute(&member, &evidence_hash).unwrap().unwrap();
+        let t0 = env.ledger().timestamp();
+        client.try_resolve_dispute(&admin, &1u32).unwrap().unwrap();
+
+        // Advance past window expiry
+        env.ledger().set_timestamp(t0 + 25 * 3600);
+        let res = client.try_extend_dispute_window(&member, &3600);
+        assert_eq!(res, Err(Ok(CircleError::ResolutionTimelockActive)));
     }
 
     #[test]

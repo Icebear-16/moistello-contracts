@@ -48,6 +48,15 @@ fn deploy_validated(env: &Env, config: &CircleConfig) -> Result<Address, Factory
     env.storage().persistent().set(&DataKey::CircleList, &circles);
     let c: u32 = env.storage().instance().get(&DataKey::CircleCount).unwrap_or(0);
     env.storage().instance().set(&DataKey::CircleCount, &c.checked_add(1).ok_or(FactoryError::InvalidConfig)?);
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("created")),
+        CircleCreated {
+            address: cid.clone(),
+            admin: config.organizer.clone(),
+            token: config.token.clone(),
+            timestamp: now,
+        },
+    );
     env.events().publish((env.current_contract_address(), symbol_short!("deploy")), CircleDeployed { creator: config.organizer.clone(), circle_id: cid.clone(), name: config.name.clone() });
     Ok(cid)
 }

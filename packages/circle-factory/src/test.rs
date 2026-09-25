@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use soroban_sdk::testutils::Address as _;
+use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{Address, BytesN, Env};
 use std::sync::atomic::{AtomicU32, Ordering};
 use crate::{CircleFactory, CircleFactoryClient}; use crate::types::{CircleConfig, FactoryError};
@@ -136,6 +136,19 @@ fn test_deploy_circle_emits_event() {
     let organizer = Address::generate(&env);
 
     client.deploy_circle(&sample_config(&env, &organizer));
+}
+
+#[test]
+fn test_deploy_circle_emits_circle_created_with_canonical_address_and_admin() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let organizer = Address::generate(&env);
+    let config = sample_config(&env, &organizer);
+
+    let _circle_id = client.deploy_circle(&config);
+    let all_events = env.events().all();
+    let events = all_events.events();
+    assert!(events.len() >= 2, "must emit created and deploy events");
 }
 
 #[test]

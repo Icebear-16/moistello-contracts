@@ -24,6 +24,7 @@ pub use types::CircleError;
     pub fn raise_dispute(env:Env,member:Address,evidence_hash:BytesN<32>)->Result<(),types::CircleError>{contract::raise_dispute(&env,&member,&evidence_hash)}
     pub fn resolve_dispute(env:Env,admin:Address,resolution:u32)->Result<(),types::CircleError>{contract::resolve_dispute(&env,&admin,resolution)}
     pub fn challenge_dispute_resolution(env:Env,member:Address)->Result<(),types::CircleError>{contract::challenge_dispute_resolution(&env,&member)}
+    pub fn extend_dispute_window(env:Env,challenger:Address,extension_seconds:u64)->Result<u64,types::CircleError>{contract::extend_dispute_window(&env,&challenger,extension_seconds)}
     pub fn execute_dispute_resolution(env:Env)->Result<(),types::CircleError>{contract::execute_dispute_resolution(&env)}
     pub fn get_status(env:Env)->types::Circle{contract::get_status(&env)}
     pub fn get_members(env:Env)->soroban_sdk::Vec<types::Member>{contract::get_members(&env)}

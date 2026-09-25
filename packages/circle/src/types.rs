@@ -32,6 +32,7 @@ pub struct CircleCompleted{pub total_payouts:i128}
 #[contracttype]#[derive(Clone,Debug)]pub struct OracleFallbackUsed{pub round:u32,pub primary_oracle:Address,pub fallback_oracle:Address}
 #[contracttype]#[derive(Clone,Debug)]pub struct DisputeResolutionProposed{pub admin:Address,pub resolution:u32,pub execute_after:u64}
 #[contracttype]#[derive(Clone,Debug)]pub struct DisputeResolutionChallenged{pub member:Address}
+#[contracttype]#[derive(Clone,Debug,PartialEq)]pub struct DisputeWindowExtended{pub challenger:Address,pub extension_seconds:u64,pub new_execute_after:u64}
 #[contracttype]#[derive(Clone,Debug)]pub struct DisputeResolved{pub admin:Address,pub resolution:u32}
 #[contracttype]#[derive(Clone,Debug)]pub struct BatchExitExecuted{pub round:u32,pub exited_count:u32}
 #[contracttype]#[derive(Clone,Debug,PartialEq)]pub enum PayoutType{Random=0,Fixed=1,Auction=2,Vote=3}

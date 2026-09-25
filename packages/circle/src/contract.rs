@@ -9,7 +9,7 @@ use crate::types::*;
 // no local reentrancy.rs in this package. See packages/common/src/reentrancy.rs for
 // the canonical implementation and the rationale for centralisation.
 use common::reentrancy::ReentrancyGuard;
-use common::{expiry, math, multisig, pause, validation};
+use common::{bitmap, expiry, math, multisig, pause, validation};
 use reputation_registry::scoring;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
@@ -1318,6 +1318,7 @@ pub fn dispute(
 /// bounds the blast radius of a compromised admin key — a malicious
 /// resolution can be challenged and blocked before it takes effect.
 pub const DISPUTE_RESOLUTION_TIMELOCK_SECONDS: u64 = 24 * 60 * 60;
+pub const MAX_DISPUTE_WINDOW_EXTENSION_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 /// Proposes a resolution for an active dispute (#364). Does not apply the
 /// resolution immediately — it starts a timelock during which any circle
@@ -1463,6 +1464,89 @@ pub fn challenge_dispute_resolution(env: &Env, member: &Address) -> Result<(), C
         },
     );
     Ok(())
+}
+
+/// Allows an active circle member (challenger) to extend the active dispute resolution
+/// timelock window (#437). This grants additional time to review or challenge
+/// pending dispute resolutions before they can be executed.
+///
+/// # Parameters
+/// - `env`: Contract execution environment
+/// - `challenger`: Member requesting the window extension
+/// - `extension_seconds`: Additional seconds to extend the timelock window by
+///
+/// # Returns
+/// - `Ok(u64)` with the new `execute_after` timestamp
+/// - `Err(CircleError::ContractPaused)` if circle is paused
+/// - `Err(CircleError::NotMember)` if challenger is not an active member
+/// - `Err(CircleError::NoPendingResolution)` if no dispute resolution is pending
+/// - `Err(CircleError::ResolutionTimelockActive)` if window has already expired
+/// - `Err(CircleError::InvalidAmount)` if extension_seconds == 0 or exceeds maximum limit
+pub fn extend_dispute_window(
+    env: &Env,
+    challenger: &Address,
+    extension_seconds: u64,
+) -> Result<u64, CircleError> {
+    pause::when_not_paused(env).map_err(|_| CircleError::ContractPaused)?;
+    validate_addr(env, challenger)?;
+    challenger.require_auth();
+
+    let members: Vec<Member> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Members)
+        .ok_or(CircleError::NotInitialized)?;
+    let mut is_member = false;
+    for i in 0..members.len() {
+        let m = members.get(i).ok_or(CircleError::VecAccessError)?;
+        if m.address == *challenger && m.status == MEMBER_ACTIVE {
+            is_member = true;
+            break;
+        }
+    }
+    if !is_member {
+        return Err(CircleError::NotMember);
+    }
+
+    if extension_seconds == 0 || extension_seconds > MAX_DISPUTE_WINDOW_EXTENSION_SECONDS {
+        return Err(CircleError::InvalidAmount);
+    }
+
+    let mut pending: PendingDisputeResolution = env
+        .storage()
+        .persistent()
+        .get(&DataKey::PendingResolution)
+        .ok_or(CircleError::NoPendingResolution)?;
+
+    let now = env.ledger().timestamp();
+    if now >= pending.execute_after {
+        return Err(CircleError::ResolutionTimelockActive);
+    }
+
+    let new_execute_after = pending
+        .execute_after
+        .checked_add(extension_seconds)
+        .ok_or(CircleError::InvalidAmount)?;
+
+    pending.execute_after = new_execute_after;
+    env.storage()
+        .persistent()
+        .set(&DataKey::PendingResolution, &pending);
+
+    env.events().publish(
+        (
+            env.current_contract_address(),
+            symbol_short!("dis_ext"),
+            challenger.clone(),
+        ),
+        DisputeWindowExtended {
+            challenger: challenger.clone(),
+            extension_seconds,
+            new_execute_after,
+        },
+    );
+
+    Ok(new_execute_after)
 }
 
 /// Applies a pending dispute resolution once its timelock has elapsed
@@ -1689,7 +1773,7 @@ pub fn get_pending_payout(env: &Env, member: &Address) -> Option<i128> {
     match circle.payout_type {
         PAYOUT_FIXED => {
             let pos = round % circle.max_members;
-            if (circle.payout_bitmap & (1u128 << pos)) != 0 {
+            if bitmap::is_set(circle.payout_bitmap, pos).unwrap_or(true) {
                 return None;
             }
             for i in 0..members.len() {
@@ -1705,7 +1789,7 @@ pub fn get_pending_payout(env: &Env, member: &Address) -> Option<i128> {
             for i in 0..members.len() {
                 if let Some(m) = members.get(i) {
                     if m.address == *member && m.status == MEMBER_ACTIVE {
-                        if (circle.payout_bitmap & (1u128 << m.position)) != 0 {
+                        if bitmap::is_set(circle.payout_bitmap, m.position).unwrap_or(true) {
                             return None;
                         }
                         return Some(net);
@@ -1959,7 +2043,7 @@ pub fn batch_payout(
     pause::when_not_paused(env).map_err(|_| CircleError::ContractPaused)?;
     let _guard = ReentrancyGuard::new(env).map_err(|_| CircleError::NotActive)?;
     validate_addr(env, caller)?;
-    let circle: Circle = env
+    let mut circle: Circle = env
         .storage()
         .instance()
         .get(&DataKey::Circle)

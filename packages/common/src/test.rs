@@ -90,3 +90,78 @@ fn convert_shares_overflow_on_huge_inputs() {
     let result = convert_shares(i128::MAX, 1, i128::MAX);
     assert_eq!(result, Err(MathError::Overflow));
 }
+
+// ── Bitmap encode / decode / bounds unit tests (#438) ───────────────────────
+
+use crate::bitmap::{clear_bit, count_set_bits, encode_bit, first_unset_bit, is_set, set_bit, BitmapError, MAX_BITMAP_CAPACITY};
+
+#[test]
+fn bitmap_encode_and_decode_valid_indices() {
+    for i in 0..MAX_BITMAP_CAPACITY {
+        let mask = encode_bit(i).expect("valid index must encode");
+        assert_eq!(mask, 1u128 << i);
+        assert!(is_set(mask, i).expect("must be set"));
+        assert_eq!(count_set_bits(mask), 1);
+    }
+}
+
+#[test]
+fn bitmap_set_and_clear_bit() {
+    let mut bitmap: u128 = 0;
+    assert!(!is_set(bitmap, 0).unwrap());
+    assert!(!is_set(bitmap, 63).unwrap());
+    assert!(!is_set(bitmap, 127).unwrap());
+
+    set_bit(&mut bitmap, 0).unwrap();
+    set_bit(&mut bitmap, 63).unwrap();
+    set_bit(&mut bitmap, 127).unwrap();
+
+    assert!(is_set(bitmap, 0).unwrap());
+    assert!(is_set(bitmap, 63).unwrap());
+    assert!(is_set(bitmap, 127).unwrap());
+    assert!(!is_set(bitmap, 1).unwrap());
+    assert_eq!(count_set_bits(bitmap), 3);
+
+    clear_bit(&mut bitmap, 63).unwrap();
+    assert!(!is_set(bitmap, 63).unwrap());
+    assert!(is_set(bitmap, 0).unwrap());
+    assert!(is_set(bitmap, 127).unwrap());
+    assert_eq!(count_set_bits(bitmap), 2);
+}
+
+#[test]
+fn bitmap_first_unset_bit() {
+    let mut bitmap: u128 = 0;
+    assert_eq!(first_unset_bit(bitmap, 10).unwrap(), Some(0));
+
+    set_bit(&mut bitmap, 0).unwrap();
+    set_bit(&mut bitmap, 1).unwrap();
+    assert_eq!(first_unset_bit(bitmap, 10).unwrap(), Some(2));
+
+    for i in 2..10 {
+        set_bit(&mut bitmap, i).unwrap();
+    }
+    assert_eq!(first_unset_bit(bitmap, 10).unwrap(), None);
+}
+
+#[test]
+fn bitmap_bounds_validation_rejects_greater_than_128_members() {
+    // Tests u128 overflow with >128 members.
+    // Index 128 is the first out-of-bounds index for a 128-bit bitmap.
+    let mut bitmap: u128 = 0;
+
+    assert_eq!(encode_bit(128), Err(BitmapError::IndexOutOfBounds));
+    assert_eq!(encode_bit(129), Err(BitmapError::IndexOutOfBounds));
+    assert_eq!(encode_bit(200), Err(BitmapError::IndexOutOfBounds));
+    assert_eq!(encode_bit(u32::MAX), Err(BitmapError::IndexOutOfBounds));
+
+    assert_eq!(is_set(bitmap, 128), Err(BitmapError::IndexOutOfBounds));
+    assert_eq!(is_set(bitmap, 256), Err(BitmapError::IndexOutOfBounds));
+
+    assert_eq!(set_bit(&mut bitmap, 128), Err(BitmapError::IndexOutOfBounds));
+    assert_eq!(set_bit(&mut bitmap, 1000), Err(BitmapError::IndexOutOfBounds));
+
+    assert_eq!(clear_bit(&mut bitmap, 128), Err(BitmapError::IndexOutOfBounds));
+    assert_eq!(first_unset_bit(bitmap, 129), Err(BitmapError::IndexOutOfBounds));
+}
+
