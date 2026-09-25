@@ -142,6 +142,8 @@ substitute_vars() {
   local args="$1"
   args="${args//\{ADMIN_PUBLIC\}/$ADMIN_PUBLIC}"
   args="${args//\{CIRCLE_WASM_HASH\}/${CIRCLE_WASM_HASH:-}}"
+  args="${args//\{TREASURY_ID\}/${CONTRACT_IDS[treasury]:-}}"
+  args="${args//\{REP_ID\}/${CONTRACT_IDS[reputation_registry]:-}}"
   echo "$args"
 }
 
@@ -161,11 +163,12 @@ deploy_contracts() {
   num_contracts=$(jq '.contracts | length' "$MANIFEST")
 
   for (( i=0; i<num_contracts; i++ )); do
-    local name wasm install_only init_args
+    local name wasm install_only init_args post_init_args
     name=$(jq -r ".contracts[$i].name" "$MANIFEST")
     wasm=$(jq -r ".contracts[$i].wasm" "$MANIFEST")
     install_only=$(jq -r ".contracts[$i].install_only" "$MANIFEST")
     init_args=$(jq -r ".contracts[$i].init_args" "$MANIFEST")
+    post_init_args=$(jq -r ".contracts[$i].post_init_args // empty" "$MANIFEST")
 
     log_info "[$((i+1))/$num_contracts] Processing: $name"
 
@@ -214,6 +217,19 @@ deploy_contracts() {
           -- init $resolved_args \
         && log_ok "  Initialised $name" \
         || log_warn "  $name init skipped (may already be initialised)"
+      fi
+      if [[ -n "$post_init_args" ]]; then
+        local resolved_post_args
+        resolved_post_args=$(substitute_vars "$post_init_args")
+        log_info "  Applying post-init configuration for $name"
+        # shellcheck disable=SC2086
+        run stellar contract invoke \
+          --id "$contract_id" \
+          --source "$ADMIN_IDENTITY" \
+          --network "$NETWORK" \
+          -- set_factory_config $resolved_post_args \
+        && log_ok "  Applied post-init configuration for $name" \
+        || { log_error "  Failed to apply post-init configuration for $name"; exit 1; }
       fi
     fi
   done

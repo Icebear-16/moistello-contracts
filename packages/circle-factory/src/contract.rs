@@ -2,7 +2,12 @@ use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     Address, BytesN, Env, IntoVal, String, Symbol, Vec, symbol_short,
 };
-use crate::types::*; use common::pause;
+use crate::types::*;
+use common::{pause, validation};
+
+fn validate_config_address(env: &Env, address: &Address) -> Result<(), FactoryError> {
+    validation::validate_address(env, address).map_err(|_| FactoryError::InvalidAddress)
+}
 
 fn load_templates(env: &Env) -> Vec<CircleTemplate> {
     env.storage().persistent().get(&DataKey::Templates).unwrap_or_else(|| Vec::new(env))
@@ -33,13 +38,62 @@ fn validate_template_config(t: &CircleTemplate, config: &CircleConfig) -> Result
     Ok(())
 }
 
-fn deploy_validated(env: &Env, config: &CircleConfig) -> Result<Address, FactoryError> {
+fn load_factory_config(env: &Env) -> Result<FactoryConfig, FactoryError> {
+    let config: FactoryConfig = env
+        .storage()
+        .instance()
+        .get(&DataKey::FactoryConfig)
+        .ok_or(FactoryError::FactoryConfigNotSet)?;
+    if config.fee_bps > 10_000 {
+        return Err(FactoryError::InvalidFeeBps);
+    }
+    validate_config_address(env, &config.treasury)?;
+    validate_config_address(env, &config.reputation_registry)?;
+    Ok(config)
+}
+
+fn configure_deployed_circle(
+    env: &Env,
+    circle_id: &Address,
+    config: &FactoryConfig,
+) -> Result<(), FactoryError> {
+    let function_name = Symbol::new(env, "configure_from_factory");
+    let args = soroban_sdk::vec![
+        env,
+        env.current_contract_address().into_val(env),
+        config.treasury.clone().into_val(env),
+        config.reputation_registry.clone().into_val(env),
+        config.fee_bps.into_val(env),
+    ];
+    env.authorize_as_current_contract(soroban_sdk::vec![
+        env,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: circle_id.clone(),
+                fn_name: function_name.clone(),
+                args: args.clone(),
+            },
+            sub_invocations: soroban_sdk::vec![env],
+        }),
+    ]);
+    match env.try_invoke_contract::<(), soroban_sdk::Error>(circle_id, &function_name, args) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) | Err(_) => Err(FactoryError::CircleConfigurationFailed),
+    }
+}
+
+fn deploy_validated(
+    env: &Env,
+    config: &CircleConfig,
+    factory_config: &FactoryConfig,
+) -> Result<Address, FactoryError> {
     if env.storage().persistent().has(&DataKey::Slug(config.slug.clone())) { return Err(FactoryError::DuplicateSlug); }
     let wh: BytesN<32> = env.storage().instance().get(&DataKey::WasmHash).ok_or(FactoryError::WasmHashNotSet)?;
     let count: u32 = env.storage().instance().get(&DataKey::CircleCount).unwrap_or(0);
     let mut salt = [0u8; 32];
     salt[28..32].copy_from_slice(&count.to_be_bytes());
     let cid = env.deployer().with_current_contract(BytesN::from_array(env, &salt)).deploy_v2(wh, (config.organizer.clone(), env.current_contract_address(), config.clone()));
+    configure_deployed_circle(env, &cid, factory_config)?;
     let now = env.ledger().timestamp();
     let mut circles: Vec<CircleEntry> = env.storage().persistent().get(&DataKey::CircleList).unwrap_or_else(|| Vec::new(env));
     circles.push_back(CircleEntry { circle_id: cid.clone(), name: config.name.clone(), organizer: config.organizer.clone(), deployed_at: now, status: 0 });
@@ -109,6 +163,35 @@ pub fn init(
     Ok(())
 }
 
+pub fn init_with_config(
+    env: &Env,
+    admin: &Address,
+    fee_bps: i128,
+    treasury: &Address,
+    reputation_registry: &Address,
+    circle_wasm_hash: &BytesN<32>,
+) -> Result<(), FactoryError> {
+    init(env, admin, fee_bps, circle_wasm_hash, None, None)?;
+    validate_config_address(env, treasury)?;
+    validate_config_address(env, reputation_registry)?;
+    let config = FactoryConfig {
+        treasury: treasury.clone(),
+        reputation_registry: reputation_registry.clone(),
+        fee_bps: fee_bps as u32,
+    };
+    env.storage().instance().set(&DataKey::FactoryConfig, &config);
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("fcfg")),
+        FactoryConfigUpdated {
+            treasury: treasury.clone(),
+            reputation_registry: reputation_registry.clone(),
+            fee_bps: fee_bps as u32,
+            updated_by: admin.clone(),
+        },
+    );
+    Ok(())
+}
+
 fn charge_deploy_fee(env: &Env, organizer: &Address, token: &Address) -> Result<(), FactoryError> {
     let deploy_fee: i128 = env.storage().instance().get(&DataKey::DeployFee).unwrap_or(0);
     if deploy_fee > 0 {
@@ -146,8 +229,9 @@ pub fn deploy_circle(env: &Env, config: &CircleConfig) -> Result<Address, Factor
     config.organizer.require_auth();
     if config.max_members < 2 || config.contribution_amount <= 0 || config.total_rounds == 0 || config.payout_type > 3 { return Err(FactoryError::InvalidConfig); }
     if config.slug.len() == 0 { return Err(FactoryError::EmptySlug); }
+    let factory_config = load_factory_config(env)?;
     charge_deploy_fee(env, &config.organizer, &config.token)?;
-    deploy_validated(env, config)
+    deploy_validated(env, config, &factory_config)
 }
 
 pub fn get_deploy_fee(env: &Env) -> i128 {
@@ -232,8 +316,9 @@ pub fn deploy_from_template(env: &Env, template_id: u32, organizer: &Address, to
         slug,
     };
     validate_template_config(&t, &config)?;
+    let factory_config = load_factory_config(env)?;
     charge_deploy_fee(env, organizer, token)?;
-    let cid = deploy_validated(env, &config)?;
+    let cid = deploy_validated(env, &config, &factory_config)?;
     env.events().publish((env.current_contract_address(), symbol_short!("tmpl_dep")), TemplateDeployed { template_id, circle_id: cid.clone(), creator: organizer.clone() });
     Ok(cid)
 }
@@ -243,8 +328,9 @@ pub fn deploy_from_template_custom(env: &Env, template_id: u32, config: &CircleC
     config.organizer.require_auth();
     let t = find_template(&load_templates(env), template_id)?;
     validate_template_config(&t, config)?;
+    let factory_config = load_factory_config(env)?;
     charge_deploy_fee(env, &config.organizer, &config.token)?;
-    let cid = deploy_validated(env, config)?;
+    let cid = deploy_validated(env, config, &factory_config)?;
     env.events().publish((env.current_contract_address(), symbol_short!("tmpl_dep")), TemplateDeployed { template_id, circle_id: cid.clone(), creator: config.organizer.clone() });
     Ok(cid)
 }
@@ -318,6 +404,59 @@ pub fn get_circle_count(env: &Env) -> u32 { env.storage().instance().get(&DataKe
 /// # Panics
 /// Never panics.
 pub fn get_fee_config(env: &Env) -> FeeConfig { env.storage().instance().get(&DataKey::FeeConfig).unwrap_or_else(|| FeeConfig { fee_bps:0, updated_at:0, updated_by: env.current_contract_address() }) }
+
+pub fn get_factory_config(env: &Env) -> Option<FactoryConfig> {
+    env.storage().instance().get(&DataKey::FactoryConfig)
+}
+
+pub fn set_factory_config(
+    env: &Env,
+    admin: &Address,
+    treasury: &Address,
+    reputation_registry: &Address,
+    fee_bps: u32,
+) -> Result<(), FactoryError> {
+    admin.require_auth();
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(FactoryError::NotInitialized)?;
+    if admin != &stored_admin {
+        return Err(FactoryError::Unauthorized);
+    }
+    pause::when_not_paused(env).map_err(|_| FactoryError::ContractPaused)?;
+    if fee_bps > 10_000 {
+        return Err(FactoryError::InvalidFeeBps);
+    }
+    validate_config_address(env, treasury)?;
+    validate_config_address(env, reputation_registry)?;
+    let config = FactoryConfig {
+        treasury: treasury.clone(),
+        reputation_registry: reputation_registry.clone(),
+        fee_bps,
+    };
+    env.storage().instance().set(&DataKey::FactoryConfig, &config);
+    env.storage().instance().set(
+        &DataKey::FeeConfig,
+        &FeeConfig {
+            fee_bps: fee_bps as i128,
+            updated_at: env.ledger().timestamp(),
+            updated_by: admin.clone(),
+        },
+    );
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("fcfg")),
+        FactoryConfigUpdated {
+            treasury: treasury.clone(),
+            reputation_registry: reputation_registry.clone(),
+            fee_bps,
+            updated_by: admin.clone(),
+        },
+    );
+    Ok(())
+}
+
 /// Updates the fee configuration for all future circle deployments.
 ///
 /// # Parameters
@@ -341,13 +480,18 @@ pub fn get_fee_config(env: &Env) -> FeeConfig { env.storage().instance().get(&Da
 /// # Panics
 /// Never panics. All errors are returned as typed FactoryError variants.
 pub fn set_fee_config(env: &Env, admin: &Address, fee_bps: i128) -> Result<(), FactoryError> {
-    pause::when_not_paused(env).map_err(|_| FactoryError::ContractPaused)?;
     admin.require_auth();
     let s: Address = env.storage().instance().get(&DataKey::Admin).ok_or(FactoryError::NotInitialized)?;
     if admin != &s { return Err(FactoryError::Unauthorized); }
+    pause::when_not_paused(env).map_err(|_| FactoryError::ContractPaused)?;
     if fee_bps < 0 || fee_bps > 10_000 { return Err(FactoryError::InvalidFeeBps); }
     let old: FeeConfig = env.storage().instance().get(&DataKey::FeeConfig).unwrap_or_else(|| FeeConfig { fee_bps:0, updated_at:0, updated_by: env.current_contract_address() });
+    let normalized_fee_bps = fee_bps as u32;
     env.storage().instance().set(&DataKey::FeeConfig, &FeeConfig { fee_bps, updated_at: env.ledger().timestamp(), updated_by: admin.clone() });
+    if let Some(mut factory_config) = env.storage().instance().get::<_, FactoryConfig>(&DataKey::FactoryConfig) {
+        factory_config.fee_bps = normalized_fee_bps;
+        env.storage().instance().set(&DataKey::FactoryConfig, &factory_config);
+    }
     env.events().publish((env.current_contract_address(), symbol_short!("fee_cfg")), FeeConfigUpdated { old_fee_bps: old.fee_bps, new_fee_bps: fee_bps, updated_by: admin.clone() });
     Ok(())
 }

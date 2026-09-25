@@ -51,19 +51,19 @@ soroban config identity address "$IDENTITY" 2>/dev/null
 WASM_DIR="target/wasm32v1-none/release"
 
 # Deploy contracts in dependency order
-echo "1/4 Deploying Circle Factory..."
-FACTORY_ID=$(soroban contract deploy \
-    --wasm "$WASM_DIR/circle_factory.optimized.wasm" \
-    --source "$IDENTITY" \
-    --network "$NETWORK")
-echo "   Factory: $FACTORY_ID"
-
-echo "2/4 Deploying Circle (base template)..."
+echo "1/4 Installing Circle WASM..."
 CIRCLE_WASM_HASH=$(soroban contract install \
     --wasm "$WASM_DIR/circle.optimized.wasm" \
     --source "$IDENTITY" \
     --network "$NETWORK")
 echo "   Circle WASM Hash: $CIRCLE_WASM_HASH"
+
+echo "2/4 Deploying Treasury..."
+TREASURY_ID=$(soroban contract deploy \
+    --wasm "$WASM_DIR/treasury.optimized.wasm" \
+    --source "$IDENTITY" \
+    --network "$NETWORK")
+echo "   Treasury: $TREASURY_ID"
 
 echo "3/4 Deploying Reputation Registry..."
 REP_ID=$(soroban contract deploy \
@@ -72,18 +72,19 @@ REP_ID=$(soroban contract deploy \
     --network "$NETWORK")
 echo "   Reputation: $REP_ID"
 
-echo "4/4 Deploying Treasury..."
-TREASURY_ID=$(soroban contract deploy \
-    --wasm "$WASM_DIR/treasury.optimized.wasm" \
+echo "4/4 Deploying Circle Factory..."
+FACTORY_ID=$(soroban contract deploy \
+    --wasm "$WASM_DIR/circle_factory.optimized.wasm" \
     --source "$IDENTITY" \
     --network "$NETWORK")
-echo "   Treasury: $TREASURY_ID"
+echo "   Factory: $FACTORY_ID"
 
 echo ""
 echo "Initializing deployed contracts..."
 soroban contract invoke --id "$TREASURY_ID" --source "$IDENTITY" --network "$NETWORK" -- init --admin "$ADMIN_PUBLIC" 2>/dev/null || echo "   Treasury already initialized or skipped"
 soroban contract invoke --id "$REP_ID" --source "$IDENTITY" --network "$NETWORK" -- init --admin "$ADMIN_PUBLIC" 2>/dev/null || echo "   Reputation Registry already initialized or skipped"
-soroban contract invoke --id "$FACTORY_ID" --source "$IDENTITY" --network "$NETWORK" -- init --admin "$ADMIN_PUBLIC" --circle_wasm_hash "$CIRCLE_WASM_HASH" 2>/dev/null || echo "   Circle Factory already initialized or skipped"
+soroban contract invoke --id "$FACTORY_ID" --source "$IDENTITY" --network "$NETWORK" -- init --admin "$ADMIN_PUBLIC" --fee_bps 50 --circle_wasm_hash "$CIRCLE_WASM_HASH" --deploy_fee 0 --treasury "$TREASURY_ID" 2>/dev/null || echo "   Circle Factory already initialized or skipped"
+soroban contract invoke --id "$FACTORY_ID" --source "$IDENTITY" --network "$NETWORK" -- set_factory_config --admin "$ADMIN_PUBLIC" --treasury "$TREASURY_ID" --reputation_registry "$REP_ID" --fee_bps 50
 
 echo ""
 echo "=== Deployment Complete ==="

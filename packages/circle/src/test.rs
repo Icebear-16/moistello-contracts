@@ -1424,3 +1424,65 @@ fn test_trigger_payout_transfers_tokens_and_deposits_fee() {
         assert!(result.is_ok());
         assert_eq!(client.get_status().status, 3u32); // STATUS_CANCELLED
     }
+
+    #[test]
+    fn test_configure_from_factory_sets_protocol_config() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let config = create_config(&env, &Address::generate(&env));
+        let admin = config.organizer.clone();
+        let factory = Address::generate(&env);
+        let circle_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+        let client = CircleClient::new(&env, &circle_id);
+        let treasury = Address::generate(&env);
+        let reputation_registry = Address::generate(&env);
+
+        client.configure_from_factory(
+            &factory,
+            &treasury,
+            &reputation_registry,
+            &750u32,
+        );
+
+        assert_eq!(client.get_treasury(), Some(treasury));
+        assert_eq!(client.get_reputation_registry(), Some(reputation_registry));
+        assert_eq!(client.get_fee_bps(), 750);
+    }
+
+    #[test]
+    fn test_configure_from_factory_rejects_invalid_configuration() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let config = create_config(&env, &Address::generate(&env));
+        let admin = config.organizer.clone();
+        let factory = Address::generate(&env);
+        let circle_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+        let client = CircleClient::new(&env, &circle_id);
+        let treasury = Address::generate(&env);
+        let reputation_registry = Address::generate(&env);
+
+        let unauthorized = client.try_configure_from_factory(
+            &Address::generate(&env),
+            &treasury,
+            &reputation_registry,
+            &750u32,
+        );
+        assert_eq!(unauthorized, Err(Ok(CircleError::Unauthorized)));
+
+        let invalid_fee = client.try_configure_from_factory(
+            &factory,
+            &treasury,
+            &reputation_registry,
+            &10_001u32,
+        );
+        assert_eq!(invalid_fee, Err(Ok(CircleError::InvalidAmount)));
+
+        client.pause_circle(&admin);
+        let paused = client.try_configure_from_factory(
+            &factory,
+            &treasury,
+            &reputation_registry,
+            &750u32,
+        );
+        assert_eq!(paused, Err(Ok(CircleError::ContractPaused)));
+    }

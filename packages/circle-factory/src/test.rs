@@ -3,7 +3,9 @@
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{Address, BytesN, Env};
 use std::sync::atomic::{AtomicU32, Ordering};
-use crate::{CircleFactory, CircleFactoryClient}; use crate::types::{CircleConfig, FactoryError, MAX_DEPLOY_FEE};
+use circle::CircleClient;
+use crate::{CircleFactory, CircleFactoryClient};
+use crate::types::{CircleConfig, FactoryError, MAX_DEPLOY_FEE};
 
 fn install_wasm_hash(env: &Env) -> BytesN<32> {
     // Test fixture wasm: the circle contract built from this workspace
@@ -40,13 +42,30 @@ fn sample_config(env: &Env, organizer: &Address) -> CircleConfig {
     }
 }
 
-fn setup(env: &Env) -> (CircleFactoryClient, Address, BytesN<32>) {
+fn configure_protocol(
+    env: &Env,
+    client: &CircleFactoryClient,
+    admin: &Address,
+) -> (Address, Address) {
+    let treasury = Address::generate(env);
+    let reputation_registry = Address::generate(env);
+    client.set_factory_config(admin, &treasury, &reputation_registry, &500u32);
+    (treasury, reputation_registry)
+}
+
+fn configured_setup(env: &Env) -> (CircleFactoryClient<'_>, Address, BytesN<32>, Address, Address) {
     env.mock_all_auths();
     let contract_id = env.register(CircleFactory, ());
     let client = CircleFactoryClient::new(env, &contract_id);
     let admin = Address::generate(env);
     let wh = install_wasm_hash(env);
     client.init(&admin, &500i128, &wh, &None, &None);
+    let (treasury, reputation_registry) = configure_protocol(env, &client, &admin);
+    (client, admin, wh, treasury, reputation_registry)
+}
+
+fn setup(env: &Env) -> (CircleFactoryClient<'_>, Address, BytesN<32>) {
+    let (client, admin, wh, _, _) = configured_setup(env);
     (client, admin, wh)
 }
 
@@ -67,6 +86,38 @@ fn test_init_stores_admin_and_config() {
 }
 
 #[test]
+fn test_init_with_config_stores_protocol_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let reputation_registry = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+
+    client.init_with_config(
+        &admin,
+        &750i128,
+        &treasury,
+        &reputation_registry,
+        &wh,
+    );
+
+    let config = client.get_factory_config().unwrap();
+    assert_eq!(config.treasury, treasury);
+    assert_eq!(config.reputation_registry, reputation_registry);
+    assert_eq!(config.fee_bps, 750);
+    assert_eq!(client.get_fee_config().fee_bps, 750);
+
+    let circle_id = client.deploy_circle(&sample_config(&env, &Address::generate(&env)));
+    let circle = CircleClient::new(&env, &circle_id);
+    assert_eq!(circle.get_treasury(), Some(treasury));
+    assert_eq!(circle.get_reputation_registry(), Some(reputation_registry));
+    assert_eq!(circle.get_fee_bps(), 750);
+}
+
+#[test]
 fn test_get_fee_config_returns_default_when_uninitialized() {
     let env = Env::default();
     let contract_id = env.register(CircleFactory, ());
@@ -74,6 +125,7 @@ fn test_get_fee_config_returns_default_when_uninitialized() {
 
     let fc = client.get_fee_config();
     assert_eq!(fc.fee_bps, 0);
+    assert_eq!(client.get_factory_config(), None);
 }
 
 #[test]
@@ -447,6 +499,7 @@ fn test_deploy_circle_zero_fee_free_deployment() {
 
     // Initialize with zero fee
     client.init(&admin, &500i128, &wh, &Some(0), &None);
+    configure_protocol(&env, &client, &admin);
     assert_eq!(client.get_deploy_fee(), 0);
     assert_eq!(client.get_treasury(), None);
 
@@ -471,6 +524,7 @@ fn test_deploy_circle_charges_fee_and_routes_to_treasury() {
 
     let deploy_fee = 50_0000000i128;
     client.init(&admin, &500i128, &wh, &Some(deploy_fee), &Some(treasury.clone()));
+    configure_protocol(&env, &client, &admin);
     assert_eq!(client.get_deploy_fee(), deploy_fee);
     assert_eq!(client.get_treasury(), Some(treasury.clone()));
 
@@ -518,4 +572,149 @@ fn test_set_deploy_fee_admin_and_cap() {
     // Reject missing treasury when fee > 0
     let r_no_treasury = client.try_set_deploy_fee(&admin, &100, &None);
     assert_eq!(r_no_treasury, Err(Ok(FactoryError::InvalidTreasury)));
+}
+
+#[test]
+fn test_deploy_circle_propagates_protocol_config() {
+    let env = Env::default();
+    let (client, _admin, _wh, treasury, reputation_registry) = configured_setup(&env);
+    let organizer = Address::generate(&env);
+
+    let circle_id = client.deploy_circle(&sample_config(&env, &organizer));
+    let circle = CircleClient::new(&env, &circle_id);
+
+    assert_eq!(circle.get_treasury(), Some(treasury));
+    assert_eq!(circle.get_reputation_registry(), Some(reputation_registry));
+    assert_eq!(circle.get_fee_bps(), 500);
+}
+
+#[test]
+fn test_deploy_from_template_propagates_protocol_config() {
+    let env = Env::default();
+    let (client, _admin, _wh, treasury, reputation_registry) = configured_setup(&env);
+    let organizer = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    let circle_id = client.deploy_from_template(
+        &1,
+        &organizer,
+        &token,
+        &soroban_sdk::String::from_str(&env, "Configured Template"),
+        &soroban_sdk::String::from_str(&env, "configured-template"),
+    );
+    let circle = CircleClient::new(&env, &circle_id);
+
+    assert_eq!(circle.get_treasury(), Some(treasury));
+    assert_eq!(circle.get_reputation_registry(), Some(reputation_registry));
+    assert_eq!(circle.get_fee_bps(), 500);
+}
+
+#[test]
+fn test_deploy_circle_requires_protocol_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+    client.init(&admin, &500i128, &wh, &None, &None);
+
+    let result = client.try_deploy_circle(&sample_config(&env, &Address::generate(&env)));
+
+    assert_eq!(result, Err(Ok(FactoryError::FactoryConfigNotSet)));
+    assert_eq!(client.get_circle_count(), 0);
+    assert_eq!(client.get_circles().circles.len(), 0);
+}
+
+#[test]
+fn test_set_factory_config_validates_and_updates_fee_config() {
+    let env = Env::default();
+    let (client, admin, _wh, _treasury, _reputation_registry) = configured_setup(&env);
+    let treasury = Address::generate(&env);
+    let reputation_registry = Address::generate(&env);
+
+    assert_eq!(client.get_fee_config().fee_bps, 500);
+    client.set_factory_config(&admin, &treasury, &reputation_registry, &900u32);
+
+    let factory_config = client.get_factory_config().unwrap();
+    assert_eq!(factory_config.treasury, treasury);
+    assert_eq!(factory_config.reputation_registry, reputation_registry);
+    assert_eq!(factory_config.fee_bps, 900);
+    assert_eq!(client.get_fee_config().fee_bps, 900);
+}
+
+#[test]
+fn test_set_factory_config_rejects_unauthorized_and_invalid_fee() {
+    let env = Env::default();
+    let (client, admin, _wh, _treasury, _reputation_registry) = configured_setup(&env);
+    let stranger = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let reputation_registry = Address::generate(&env);
+
+    assert_eq!(
+        client.try_set_factory_config(
+            &stranger,
+            &treasury,
+            &reputation_registry,
+            &900u32,
+        ),
+        Err(Ok(FactoryError::Unauthorized))
+    );
+    assert_eq!(
+        client.try_set_factory_config(
+            &admin,
+            &treasury,
+            &reputation_registry,
+            &10_001u32,
+        ),
+        Err(Ok(FactoryError::InvalidFeeBps))
+    );
+
+    let zero = Address::from_string(&soroban_sdk::String::from_str(
+        &env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    ));
+    assert_eq!(
+        client.try_set_factory_config(
+            &admin,
+            &zero,
+            &reputation_registry,
+            &500u32,
+        ),
+        Err(Ok(FactoryError::InvalidAddress))
+    );
+}
+
+#[test]
+fn test_set_fee_config_keeps_protocol_config_in_sync() {
+    let env = Env::default();
+    let (client, admin, _wh, _treasury, _reputation_registry) = configured_setup(&env);
+
+    client.set_fee_config(&admin, &900i128);
+
+    assert_eq!(client.get_factory_config().unwrap().fee_bps, 900);
+}
+
+#[test]
+fn test_circle_configuration_rejects_non_factory() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let factory_client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let organizer = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+    factory_client.init(&admin, &500i128, &wh, &None, &None);
+    let (treasury, reputation_registry) = configure_protocol(&env, &factory_client, &admin);
+    let circle_id = factory_client.deploy_circle(&sample_config(&env, &organizer));
+    let circle = CircleClient::new(&env, &circle_id);
+
+    let result = circle.try_configure_from_factory(
+        &Address::generate(&env),
+        &treasury,
+        &reputation_registry,
+        &750u32,
+    );
+
+    assert_eq!(result, Err(Ok(circle::CircleError::Unauthorized)));
 }

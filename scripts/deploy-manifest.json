@@ -10,11 +10,11 @@
       "dependencies": []
     },
     {
-      "name": "circle_factory",
-      "wasm": "target/wasm32v1-none/release/circle_factory.optimized.wasm",
+      "name": "treasury",
+      "wasm": "target/wasm32v1-none/release/treasury.optimized.wasm",
       "install_only": false,
-      "init_args": "--admin {ADMIN_PUBLIC} --circle_wasm_hash {CIRCLE_WASM_HASH}",
-      "dependencies": ["circle"]
+      "init_args": "--admin {ADMIN_PUBLIC}",
+      "dependencies": []
     },
     {
       "name": "reputation_registry",
@@ -24,11 +24,12 @@
       "dependencies": []
     },
     {
-      "name": "treasury",
-      "wasm": "target/wasm32v1-none/release/treasury.optimized.wasm",
+      "name": "circle_factory",
+      "wasm": "target/wasm32v1-none/release/circle_factory.optimized.wasm",
       "install_only": false,
-      "init_args": "--admin {ADMIN_PUBLIC}",
-      "dependencies": []
+      "init_args": "--admin {ADMIN_PUBLIC} --fee_bps 50 --circle_wasm_hash {CIRCLE_WASM_HASH} --deploy_fee 0 --treasury {TREASURY_ID}",
+      "post_init_args": "--admin {ADMIN_PUBLIC} --treasury {TREASURY_ID} --reputation_registry {REP_ID} --fee_bps 50",
+      "dependencies": ["circle", "treasury", "reputation_registry"]
     }
   ]
 }

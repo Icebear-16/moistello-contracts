@@ -324,6 +324,7 @@ dependencies = [
 name = "circle-factory"
 version = "0.1.0"
 dependencies = [
+ "circle",
  "common",
  "soroban-sdk",
  "soroban-token-sdk",

@@ -5,6 +5,7 @@ use soroban_sdk::{contract, contractimpl, Address, BytesN, Env};
 #[contractimpl]
 impl CircleFactory {
     pub fn init(env: Env, admin: Address, fee_bps: i128, circle_wasm_hash: BytesN<32>, deploy_fee: Option<i128>, treasury: Option<Address>) -> Result<(), types::FactoryError> { contract::init(&env, &admin, fee_bps, &circle_wasm_hash, deploy_fee, treasury) }
+    pub fn init_with_config(env: Env, admin: Address, fee_bps: i128, treasury: Address, reputation_registry: Address, circle_wasm_hash: BytesN<32>) -> Result<(), types::FactoryError> { contract::init_with_config(&env, &admin, fee_bps, &treasury, &reputation_registry, &circle_wasm_hash) }
     pub fn deploy_circle(env: Env, config: types::CircleConfig) -> Result<Address, types::FactoryError> { contract::deploy_circle(&env, &config) }
     pub fn get_deploy_fee(env: Env) -> i128 { contract::get_deploy_fee(&env) }
     pub fn get_treasury(env: Env) -> Option<Address> { contract::get_treasury(&env) }
@@ -13,6 +14,8 @@ impl CircleFactory {
     pub fn get_circle_config(env: Env, cid: Address) -> Result<types::CircleConfig, types::FactoryError> { contract::get_circle_config(&env, &cid) }
     pub fn get_circle_count(env: Env) -> u32 { contract::get_circle_count(&env) }
     pub fn get_fee_config(env: Env) -> types::FeeConfig { contract::get_fee_config(&env) }
+    pub fn get_factory_config(env: Env) -> Option<types::FactoryConfig> { contract::get_factory_config(&env) }
+    pub fn set_factory_config(env: Env, admin: Address, treasury: Address, reputation_registry: Address, fee_bps: u32) -> Result<(), types::FactoryError> { contract::set_factory_config(&env, &admin, &treasury, &reputation_registry, fee_bps) }
     pub fn set_fee_config(env: Env, admin: Address, fee_bps: i128) -> Result<(), types::FactoryError> { contract::set_fee_config(&env, &admin, fee_bps) }
     pub fn pause(env: Env, admin: Address) -> Result<(), types::FactoryError> { contract::pause(&env, &admin) }
     pub fn unpause(env: Env, admin: Address) -> Result<(), types::FactoryError> { contract::unpause(&env, &admin) }

@@ -2542,6 +2542,54 @@ pub fn get_member_streak(env: &Env, member: &Address) -> Streak {
         last_round: 0,
     }
 }
+pub fn configure_from_factory(
+    env: &Env,
+    factory: &Address,
+    treasury: &Address,
+    reputation_registry: &Address,
+    fee_bps: u32,
+) -> Result<(), CircleError> {
+    factory.require_auth();
+    let stored_factory: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Factory)
+        .ok_or(CircleError::NotInitialized)?;
+    if factory != &stored_factory {
+        return Err(CircleError::Unauthorized);
+    }
+    require_single_sig_allowed(env)?;
+    pause::when_not_paused(env).map_err(|_| CircleError::ContractPaused)?;
+    validate_addr(env, treasury)?;
+    validate_addr(env, reputation_registry)?;
+    if fee_bps > 10_000 {
+        return Err(CircleError::InvalidAmount);
+    }
+    env.storage().instance().set(&DataKey::Treasury, treasury);
+    env.storage()
+        .instance()
+        .set(&DataKey::ReputationRegistry, reputation_registry);
+    env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("fcfg")),
+        FactoryConfigured {
+            factory: factory.clone(),
+            treasury: treasury.clone(),
+            reputation_registry: reputation_registry.clone(),
+            fee_bps,
+        },
+    );
+    Ok(())
+}
+
+pub fn get_treasury(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Treasury)
+}
+
+pub fn get_fee_bps(env: &Env) -> u32 {
+    env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
+}
+
 // Closes #201: set_reputation_registry correctly writes to DataKey::ReputationRegistry
 pub fn set_reputation_registry(
     env: &Env,

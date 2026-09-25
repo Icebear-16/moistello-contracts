@@ -30,6 +30,7 @@ pub struct CircleCompleted{pub total_payouts:i128}
 #[contracttype]#[derive(Clone,Debug)]pub struct VoteCast{pub voter:Address,pub vote_for:Address,pub round:u32}
 #[contracttype]#[derive(Clone,Debug)]pub struct ReferralRegistered{pub referrer:Address,pub referred:Address,pub bonus_pct:u32}
 #[contracttype]#[derive(Clone,Debug)]pub struct OracleFallbackUsed{pub round:u32,pub primary_oracle:Address,pub fallback_oracle:Address}
+#[contracttype]#[derive(Clone,Debug)]pub struct FactoryConfigured{pub factory:Address,pub treasury:Address,pub reputation_registry:Address,pub fee_bps:u32}
 #[contracttype]#[derive(Clone,Debug)]pub struct DisputeResolutionProposed{pub admin:Address,pub resolution:u32,pub execute_after:u64}
 #[contracttype]#[derive(Clone,Debug)]pub struct DisputeResolutionChallenged{pub member:Address}
 #[contracttype]#[derive(Clone,Debug,PartialEq)]pub struct DisputeWindowExtended{pub challenger:Address,pub extension_seconds:u64,pub new_execute_after:u64}

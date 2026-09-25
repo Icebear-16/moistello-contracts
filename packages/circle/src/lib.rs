@@ -45,6 +45,9 @@ pub use types::CircleError;
     pub fn get_referrals(env:Env)->soroban_sdk::Vec<types::Referral>{contract::get_referrals(&env)}
     pub fn get_streaks(env:Env)->soroban_sdk::Vec<types::Streak>{contract::get_streaks(&env)}
     pub fn get_member_streak(env:Env,member:Address)->types::Streak{contract::get_member_streak(&env,&member)}
+    pub fn configure_from_factory(env:Env,factory:Address,treasury:Address,reputation_registry:Address,fee_bps:u32)->Result<(),types::CircleError>{contract::configure_from_factory(&env,&factory,&treasury,&reputation_registry,fee_bps)}
+    pub fn get_treasury(env:Env)->Option<Address>{contract::get_treasury(&env)}
+    pub fn get_fee_bps(env:Env)->u32{contract::get_fee_bps(&env)}
     pub fn set_reputation_registry(env:Env,admin:Address,registry:Address)->Result<(),types::CircleError>{contract::set_reputation_registry(&env,&admin,&registry)}
     pub fn get_reputation_registry(env:Env)->Option<Address>{contract::get_reputation_registry(&env)}
     pub fn set_treasury(env:Env,admin:Address,treasury:Address)->Result<(),types::CircleError>{contract::set_treasury(&env,&admin,&treasury)}
