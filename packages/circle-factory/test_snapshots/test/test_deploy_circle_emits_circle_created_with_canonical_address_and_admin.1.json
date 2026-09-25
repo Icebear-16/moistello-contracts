@@ -23,7 +23,9 @@
                 },
                 {
                   "bytes": "a4e08349216b7d71d5a09a69bc5b2679a1201348d2fe530fd07490b3c8e3b66f"
-                }
+                },
+                "void",
+                "void"
               ]
             }
           },
@@ -135,7 +137,7 @@
                         "symbol": "slug"
                       },
                       "val": {
-                        "string": "test-circle-2"
+                        "string": "test-circle-3"
                       }
                     },
                     {
@@ -287,7 +289,7 @@
                       "symbol": "slug"
                     },
                     "val": {
-                      "string": "test-circle-2"
+                      "string": "test-circle-3"
                     }
                   },
                   {
@@ -396,7 +398,7 @@
                     "symbol": "Slug"
                   },
                   {
-                    "string": "test-circle-2"
+                    "string": "test-circle-3"
                   }
                 ]
               },
@@ -976,6 +978,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "DeployFee"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "FeeConfig"
                           }
                         ]
@@ -1445,7 +1459,7 @@
                               "symbol": "slug"
                             },
                             "val": {
-                              "string": "test-circle-2"
+                              "string": "test-circle-3"
                             }
                           },
                           {

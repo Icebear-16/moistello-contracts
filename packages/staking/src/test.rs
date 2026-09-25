@@ -644,3 +644,123 @@ fn test_get_all_stakers_restake_after_full_lifecycle() {
     assert_eq!(stakers.len(), 1);
     assert_eq!(stakers.get(0).unwrap(), user);
 }
+
+#[test]
+fn test_reward_config_init_and_unauthorized() {
+    let (env, admin, user, token) = setup_test_env();
+    let client = deploy_staking_contract(&env, &admin, &token);
+
+    // Initial APY is 0 bps
+    let cfg = client.get_reward_config();
+    assert_eq!(cfg.apy_bps, 0);
+
+    // Non-admin update fails
+    let r = client.try_set_reward_config(&user, &1000);
+    assert_eq!(r, Err(Ok(StakingError::Unauthorized)));
+
+    // Admin update succeeds
+    assert!(client.try_set_reward_config(&admin, &1000).is_ok());
+    let cfg2 = client.get_reward_config();
+    assert_eq!(cfg2.apy_bps, 1000);
+}
+
+#[test]
+fn test_mid_stake_config_change_piecewise_recomputation() {
+    let (env, admin, user, token) = setup_test_env();
+    let client = deploy_staking_contract(&env, &admin, &token);
+
+    // Initial rate: 1000 bps (10% APY)
+    client.set_reward_config(&admin, &1000);
+
+    // User stakes 1,000 tokens for 12 months (multiplier = 5)
+    let stake_amount = 1000_0000000i128;
+    client.stake(&user, &stake_amount, &12);
+
+    // Effective APY with 12-month lock (5x multiplier)
+    assert_eq!(client.get_effective_apy(&user), 5000); // 50% effective APY
+
+    // Advance by a quarter of a year: 365 * 24 * 3600 / 4 = 7_884_000 seconds
+    let quarter_year: u64 = 7_884_000;
+    env.ledger().set_timestamp(env.ledger().timestamp() + quarter_year);
+
+    // Expected reward for first interval (0.25 year at 50% effective APY):
+    // 1000 * 0.50 * 0.25 = 125 tokens = 125_0000000
+    let reward_first_half = client.get_accrued_rewards(&user);
+    assert_eq!(reward_first_half, 125_0000000);
+
+    // Mid-stake config change: Admin updates rate to 2000 bps (20% APY)
+    // Effective APY becomes 2000 * 5 = 10000 (100%)
+    client.set_reward_config(&admin, &2000);
+    assert_eq!(client.get_effective_apy(&user), 10000);
+
+    // Advance by another quarter of a year
+    env.ledger().set_timestamp(env.ledger().timestamp() + quarter_year);
+
+    // Expected reward for second interval (0.25 year at 100% effective APY):
+    // 1000 * 1.00 * 0.25 = 250 tokens = 250_0000000
+    // Total reward = 125 + 250 = 375 tokens
+    let total_reward = client.get_accrued_rewards(&user);
+    assert_eq!(total_reward, 375_0000000);
+}
+
+#[test]
+fn test_multiple_mid_stake_config_changes_no_double_counting() {
+    let (env, admin, user, token) = setup_test_env();
+    let client = deploy_staking_contract(&env, &admin, &token);
+
+    // User stakes 1,000 tokens for 12 months (multiplier = 5)
+    let stake_amount = 1000_0000000i128;
+    client.set_reward_config(&admin, &400); // 4% base, 20% effective
+    client.stake(&user, &stake_amount, &12);
+
+    let quarter_year: u64 = 15_768_000 / 2; // 7_884_000 s
+
+    // Interval 1: 0.25 year at 20% effective = 1000 * 0.20 * 0.25 = 50 tokens
+    env.ledger().set_timestamp(env.ledger().timestamp() + quarter_year);
+    assert_eq!(client.get_accrued_rewards(&user), 50_0000000);
+
+    // Interval 2: change to 800 bps (40% effective) for 0.25 year = 1000 * 0.40 * 0.25 = 100 tokens
+    client.set_reward_config(&admin, &800);
+    env.ledger().set_timestamp(env.ledger().timestamp() + quarter_year);
+    assert_eq!(client.get_accrued_rewards(&user), 150_0000000);
+
+    // Interval 3: change to 1200 bps (60% effective) for 0.25 year = 1000 * 0.60 * 0.25 = 150 tokens
+    client.set_reward_config(&admin, &1200);
+    env.ledger().set_timestamp(env.ledger().timestamp() + quarter_year);
+    assert_eq!(client.get_accrued_rewards(&user), 300_0000000);
+}
+
+#[test]
+fn test_distribute_rewards_transfers_and_clears_accrual() {
+    let (env, admin, user, token) = setup_test_env();
+    let client = deploy_staking_contract(&env, &admin, &token);
+
+    let token_admin_client = StellarAssetClient::new(&env, &token);
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+
+    // Fund contract with reward reserve
+    token_admin_client.mint(&client.address, &10_000_0000000);
+
+    client.set_reward_config(&admin, &1000); // 10% base
+    client.stake(&user, &1000_0000000, &1); // 1 month, multiplier = 1
+
+    let initial_user_bal = token_client.balance(&user);
+
+    // Advance 1 year: 365 days
+    env.ledger().set_timestamp(env.ledger().timestamp() + 365 * 24 * 3600);
+
+    // 1000 staked for 1 month lockup: unlocks at 30 days, so accrues for 30 days
+    let accrued = client.get_accrued_rewards(&user);
+    assert!(accrued > 0);
+
+    // Claim rewards
+    let claimed = client.distribute_rewards(&user);
+    assert_eq!(claimed, accrued);
+
+    // User balance increased by claimed amount
+    assert_eq!(token_client.balance(&user), initial_user_bal + claimed);
+
+    // Accrued rewards reset to 0
+    assert_eq!(client.get_accrued_rewards(&user), 0);
+}
+

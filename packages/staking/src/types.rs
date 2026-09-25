@@ -64,6 +64,10 @@ pub enum DataKey {
     /// Ordered list of addresses with an active stake position.
     /// Updated on stake() and unstake(). Used by get_all_stakers().
     StakerList,
+    /// RewardConfig - global APY configuration
+    RewardConfig,
+    /// Map<Address, AccruedRewardState> - user's accrued reward state
+    RewardState(Address),
 }
 
 /// User's active staking position
@@ -149,5 +153,38 @@ pub struct VotingPowerQueried {
     pub user: Address,
     pub voting_power: i128,
 }
+pub const SECONDS_PER_YEAR: u64 = 365 * 24 * 60 * 60;
 
-// aligned staking reward type definitions
+/// Global staking reward configuration
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RewardConfig {
+    pub apy_bps: u32,
+    pub updated_at: u64,
+}
+
+/// User's accrued reward state tracking piecewise intervals
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AccruedRewardState {
+    pub accrued_amount: i128,
+    pub last_accrual_time: u64,
+}
+
+/// Event emitted when reward config (APY) is updated
+#[contractevent(topics = ["reward_cfg"])]
+#[derive(Clone, Debug)]
+pub struct RewardConfigUpdated {
+    pub old_apy_bps: u32,
+    pub new_apy_bps: u32,
+    pub updated_at: u64,
+}
+
+/// Event emitted when staking rewards are distributed or claimed
+#[contractevent(topics = ["reward_dist"])]
+#[derive(Clone, Debug)]
+pub struct RewardsDistributed {
+    #[topic]
+    pub user: Address,
+    pub amount: i128,
+}

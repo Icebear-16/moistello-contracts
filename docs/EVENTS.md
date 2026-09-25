@@ -25,6 +25,7 @@ struct.
 | Dispute resolution challenged | `symbol_short!("dis_chal")`, `member` | `DisputeResolutionChallenged { member }` | Challenges raised against a pending resolution |
 | Dispute window extended | `symbol_short!("dis_ext")`, `challenger` | `DisputeWindowExtended { challenger, extension_seconds, new_execute_after }` | Window extensions requested by a challenger |
 | Dispute resolved | `symbol_short!("resolved")`, `admin` | `DisputeResolved { admin, resolution }` | Finalized dispute resolutions |
+| Organizer replaced | `symbol_short!("org_rep")`, `new_organizer` | `OrganizerReplaced { old_organizer, new_organizer }` | Supermajority organizer replacement |
 | Referral registered | `symbol_short!("referral")`, `referrer` | `ReferralRegistered { referrer, referred, bonus_pct }` | All referrals by a referrer |
 | Batch exit executed | `symbol_short!("bat_exit")`, `round` | `BatchExitExecuted { round, exited_count, failed_count }` | Batch exit outcomes per round |
 
@@ -54,8 +55,26 @@ topic layout for off-chain indexers.
 | Template created | `symbol_short!("tmpl_new")` | `TemplateCreated { id, name }` | New circle templates |
 | Template deployed | `symbol_short!("tmpl_dep")` | `TemplateDeployed { template_id, circle_id, creator }` | Deployments from templates |
 | Fee config updated | `symbol_short!("fee_cfg")` | `FeeConfigUpdated { old_fee_bps, new_fee_bps, updated_by }` | Factory fee updates |
+| Deploy fee paid | `symbol_short!("fee_paid")` | `DeployFeePaid { organizer, treasury, amount, token }` | Deployment fee payments to treasury |
+| Deploy fee config updated | `symbol_short!("dep_fee")` | `DeployFeeConfigUpdated { old_fee, new_fee, treasury }` | Factory deploy fee configuration updates |
 | Migration batch progress | `symbol_short!("mig_batch")` | `MigrationBatchProgress { migrated, start_index }` | Batch circle migration progress |
 
 ## Notes for factory indexers
 
 - `CircleCreated` carries canonical deployed `address`, initial `admin`, payment `token`, and block `timestamp`, allowing indexers to correlate circles without relying on transaction sequence numbers.
+
+---
+
+# Staking Contract Event Schema
+
+This document describes the events emitted by the `staking` contract and their
+topic layout for off-chain indexers.
+
+| Event | Topics | Data type | Common query |
+|---|---|---|---|
+| Tokens staked | `staked, user` | `Staked { user, amount, period, multiplier, voting_power }` | New stake positions and voting power |
+| Unstake initiated | `unstake, user` | `UnstakeInitiated { user, amount, claimable_time }` | Unbonding positions and unlock schedule |
+| Tokens claimed | `claimed, user` | `Claimed { user, amount }` | Principal withdrawals after unbonding |
+| Reward config updated | `reward_cfg` | `RewardConfigUpdated { old_apy_bps, new_apy_bps, updated_at }` | APY rate adjustments |
+| Rewards distributed | `reward_dist, user` | `RewardsDistributed { user, amount }` | Claimed or distributed staking rewards |
+

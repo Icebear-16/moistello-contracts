@@ -1710,6 +1710,12 @@
               },
               {
                 "symbol": "contrib"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+              },
+              {
+                "u32": 0
               }
             ],
             "data": {

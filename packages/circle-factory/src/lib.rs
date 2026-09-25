@@ -4,8 +4,11 @@ use soroban_sdk::{contract, contractimpl, Address, BytesN, Env};
 #[contract] pub struct CircleFactory;
 #[contractimpl]
 impl CircleFactory {
-    pub fn init(env: Env, admin: Address, fee_bps: i128, circle_wasm_hash: BytesN<32>) -> Result<(), types::FactoryError> { contract::init(&env, &admin, fee_bps, &circle_wasm_hash) }
+    pub fn init(env: Env, admin: Address, fee_bps: i128, circle_wasm_hash: BytesN<32>, deploy_fee: Option<i128>, treasury: Option<Address>) -> Result<(), types::FactoryError> { contract::init(&env, &admin, fee_bps, &circle_wasm_hash, deploy_fee, treasury) }
     pub fn deploy_circle(env: Env, config: types::CircleConfig) -> Result<Address, types::FactoryError> { contract::deploy_circle(&env, &config) }
+    pub fn get_deploy_fee(env: Env) -> i128 { contract::get_deploy_fee(&env) }
+    pub fn get_treasury(env: Env) -> Option<Address> { contract::get_treasury(&env) }
+    pub fn set_deploy_fee(env: Env, admin: Address, fee: i128, treasury: Option<Address>) -> Result<(), types::FactoryError> { contract::set_deploy_fee(&env, &admin, fee, treasury) }
     pub fn get_circles(env: Env) -> types::CircleRegistry { contract::get_circles(&env) }
     pub fn get_circle_config(env: Env, cid: Address) -> Result<types::CircleConfig, types::FactoryError> { contract::get_circle_config(&env, &cid) }
     pub fn get_circle_count(env: Env) -> u32 { contract::get_circle_count(&env) }

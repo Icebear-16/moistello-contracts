@@ -993,6 +993,203 @@ mod tests {
         assert_eq!(client.get_status().status, 3u32); // STATUS_CANCELLED
     }
 
+    #[test]
+    fn test_organizer_replacement_supermajority_executes_immediately() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 3u32;
+        let admin = config.organizer.clone();
+        let (token, client) = setup_test_env(&env, &mut config);
+
+        let m1 = Address::generate(&env);
+        let m2 = Address::generate(&env);
+        let m3 = Address::generate(&env);
+        let new_organizer = Address::generate(&env);
+
+        env.mock_all_auths();
+        mint_tokens(&env, &token, &m1, 1000);
+        mint_tokens(&env, &token, &m2, 1000);
+        mint_tokens(&env, &token, &m3, 1000);
+
+        client.join(&m1);
+        client.join(&m2);
+        client.join(&m3);
+
+        assert_eq!(client.get_status().organizer, admin);
+
+        // Active members = 3, supermajority threshold = (3*2 + 2)/3 = 2
+        // Vote 1 of 2: threshold not yet reached
+        let res1 = client.try_propose_organizer_replacement(&m1, &new_organizer);
+        assert!(res1.is_ok());
+        assert_eq!(client.get_status().organizer, admin);
+
+        // Vote 2 of 2: threshold reached, executes immediately
+        let res2 = client.try_propose_organizer_replacement(&m2, &new_organizer);
+        assert!(res2.is_ok());
+        assert_eq!(client.get_status().organizer, new_organizer);
+    }
+
+    #[test]
+    fn test_organizer_replacement_old_organizer_retains_member_rights() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 3u32;
+        let admin = config.organizer.clone();
+        let (token, client) = setup_test_env(&env, &mut config);
+
+        let m1 = Address::generate(&env);
+        let m2 = Address::generate(&env);
+        let new_organizer = Address::generate(&env);
+
+        env.mock_all_auths();
+        mint_tokens(&env, &token, &admin, 100_0000000);
+        mint_tokens(&env, &token, &m1, 100_0000000);
+        mint_tokens(&env, &token, &m2, 100_0000000);
+
+        // Old organizer joins as member
+        client.join(&admin);
+        client.join(&m1);
+        client.join(&m2);
+
+        // Active members = 3. Supermajority = 2. m1 and m2 vote to replace organizer
+        client.propose_organizer_replacement(&m1, &new_organizer);
+        client.propose_organizer_replacement(&m2, &new_organizer);
+
+        assert_eq!(client.get_status().organizer, new_organizer);
+
+        // Verify old organizer is still an active member in the member registry
+        let members = client.get_members();
+        let mut found_admin_as_active_member = false;
+        for i in 0..members.len() {
+            let m = members.get(i).unwrap();
+            if m.address == admin && m.status == 0 { // MEMBER_ACTIVE = 0
+                found_admin_as_active_member = true;
+            }
+        }
+        assert!(found_admin_as_active_member);
+
+        // Old organizer can still contribute as a member
+        let contrib_res = client.try_contribute(&admin, &config.contribution_amount, &0);
+        assert!(contrib_res.is_ok());
+    }
+
+    #[test]
+    fn test_organizer_replacement_rejects_non_member() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 2u32;
+        let (_token, client) = setup_test_env(&env, &mut config);
+
+        let m1 = Address::generate(&env);
+        let m2 = Address::generate(&env);
+        let outsider = Address::generate(&env);
+        let new_organizer = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.join(&m1);
+        client.join(&m2);
+
+        let res = client.try_propose_organizer_replacement(&outsider, &new_organizer);
+        assert_eq!(res, Err(Ok(CircleError::NotMember)));
+    }
+
+    #[test]
+    fn test_organizer_replacement_rejects_duplicate_vote() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 3u32;
+        let (_token, client) = setup_test_env(&env, &mut config);
+
+        let m1 = Address::generate(&env);
+        let m2 = Address::generate(&env);
+        let m3 = Address::generate(&env);
+        let new_organizer = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.join(&m1);
+        client.join(&m2);
+        client.join(&m3);
+
+        client.propose_organizer_replacement(&m1, &new_organizer);
+        let res_dup = client.try_propose_organizer_replacement(&m1, &new_organizer);
+        assert_eq!(res_dup, Err(Ok(CircleError::AlreadyVoted)));
+    }
+
+    #[test]
+    fn test_organizer_replacement_rejects_current_organizer() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 2u32;
+        let admin = config.organizer.clone();
+        let (_token, client) = setup_test_env(&env, &mut config);
+
+        let m1 = Address::generate(&env);
+        let m2 = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.join(&m1);
+        client.join(&m2);
+
+        let res = client.try_propose_organizer_replacement(&m1, &admin);
+        assert_eq!(res, Err(Ok(CircleError::InvalidAddress)));
+    }
+
+    #[test]
+    fn test_advance_round_monotonic_happy_path() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 2u32;
+        config.total_rounds = 3u32;
+        let admin = config.organizer.clone();
+        let (_token, client) = setup_test_env(&env, &mut config);
+
+        let m1 = Address::generate(&env);
+        let m2 = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.join(&m1);
+        client.join(&m2);
+
+        assert_eq!(client.get_status().current_round, 0);
+
+        let next1 = client.advance_round(&admin, &0);
+        assert_eq!(next1, 1);
+        assert_eq!(client.get_status().current_round, 1);
+
+        let next2 = client.advance_round(&admin, &1);
+        assert_eq!(next2, 2);
+        assert_eq!(client.get_status().current_round, 2);
+    }
+
+    #[test]
+    fn test_advance_round_stale_submission_rejected() {
+        let env = Env::default();
+        let mut config = create_config(&env);
+        config.max_members = 2u32;
+        config.total_rounds = 3u32;
+        let admin = config.organizer.clone();
+        let (_token, client) = setup_test_env(&env, &mut config);
+
+        let m1 = Address::generate(&env);
+        let m2 = Address::generate(&env);
+
+        env.mock_all_auths();
+        client.join(&m1);
+        client.join(&m2);
+
+        // Advance to round 1
+        client.advance_round(&admin, &0);
+
+        // Try to submit stale round 0
+        let res_stale = client.try_advance_round(&admin, &0);
+        assert_eq!(res_stale, Err(Ok(CircleError::RoundNotCurrent)));
+
+        // Try to submit future round 2
+        let res_future = client.try_advance_round(&admin, &2);
+        assert_eq!(res_future, Err(Ok(CircleError::RoundNotCurrent)));
+    }
+
+
     // ===== Issue 1: Allowlist Tests =====
 
 

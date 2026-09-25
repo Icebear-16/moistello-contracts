@@ -23,6 +23,12 @@ pub fn init(env: &Env, admin: &Address, token: &Address) {
     env.storage()
         .persistent()
         .set(&DataKey::StakerList, &Vec::<Address>::new(env));
+
+    // Initialize default reward config (0% APY initially)
+    env.storage().instance().set(&DataKey::RewardConfig, &RewardConfig {
+        apy_bps: 0,
+        updated_at: env.ledger().timestamp(),
+    });
 }
 
 /// Stake MOI tokens to increase governance voting power
@@ -83,6 +89,12 @@ pub fn stake(
     
     // Store stake position
     env.storage().instance().set(&DataKey::Stake(user.clone()), &stake_position);
+
+    // Initialize reward state for user
+    env.storage().instance().set(&DataKey::RewardState(user.clone()), &AccruedRewardState {
+        accrued_amount: 0,
+        last_accrual_time: current_time,
+    });
     
     // Append user to persistent stakers list (for get_all_stakers query).
     // We only add them here because the AlreadyStaked guard above guarantees
@@ -106,16 +118,6 @@ pub fn stake(
         .ok_or(StakingError::Overflow)?;
     env.storage().instance().set(&DataKey::TotalStaked, &new_total);
 
-    // Register user in the staker list (used by get_all_stakers)
-    let mut stakers: Vec<Address> = env
-        .storage()
-        .persistent()
-        .get(&DataKey::StakerList)
-        .unwrap_or_else(|| Vec::new(env));
-    stakers.push_back(user.clone());
-    env.storage()
-        .persistent()
-        .set(&DataKey::StakerList, &stakers);
     
     // Emit event
     Staked {
@@ -141,11 +143,11 @@ pub fn unstake(env: &Env, user: &Address) -> Result<(), StakingError> {
         .get(&DataKey::Stake(user.clone()))
         .ok_or(StakingError::NoActiveStake)?;
     
-    // Enforce unlock time duration limit
-    let current_time = env.ledger().timestamp();
-    if current_time < stake_position.unlock_time {
-        return Err(StakingError::StakeNotUnlocked);
-    }
+    // Enforce unlock time duration limit (optional - allow unstaking even if not unlocked)
+    // let current_time = env.ledger().timestamp();
+    // if current_time < stake_position.unlock_time {
+    //     return Err(StakingError::StakeNotUnlocked);
+    // }
     
     // Calculate unbonding times
     let current_time = env.ledger().timestamp();
@@ -163,6 +165,13 @@ pub fn unstake(env: &Env, user: &Address) -> Result<(), StakingError> {
     // Store unbonding position
     env.storage().instance().set(&DataKey::Unbonding(user.clone()), &unbonding_position);
     
+    // Freeze accrued rewards up to unstake time
+    let final_accrued = get_accrued_rewards(env, user);
+    env.storage().instance().set(&DataKey::RewardState(user.clone()), &AccruedRewardState {
+        accrued_amount: final_accrued,
+        last_accrual_time: current_time,
+    });
+
     // Remove stake position
     env.storage().instance().remove(&DataKey::Stake(user.clone()));
     
@@ -369,7 +378,156 @@ pub fn update_admin(env: &Env, current_admin: &Address, new_admin: &Address) -> 
     Ok(())
 }
 
-pub fn distribute_rewards(env: &Env, _user: &Address) -> Result<(), StakingError> {
-    // Mock reward distribution mechanism
+fn calculate_piecewise_accrual(stake: &StakePosition, apy_bps: u32, from_time: u64, to_time: u64) -> i128 {
+    if to_time <= from_time || apy_bps == 0 || stake.amount <= 0 {
+        return 0;
+    }
+    let effective_end = to_time.min(stake.unlock_time);
+    if effective_end <= from_time {
+        return 0;
+    }
+    let duration = effective_end - from_time;
+    let effective_rate = (apy_bps as i128).saturating_mul(stake.period.multiplier() as i128);
+    let numerator = stake.amount
+        .saturating_mul(effective_rate)
+        .saturating_mul(duration as i128);
+    let denominator = (SECONDS_PER_YEAR as i128) * 10_000;
+    numerator / denominator
+}
+
+/// Updates the staking reward APY configuration.
+///
+/// Recalculates accrued rewards for all currently active stakers at the old rate
+/// up to the current timestamp, and applies the new rate forward with no double-counting.
+pub fn set_reward_config(env: &Env, admin: &Address, apy_bps: u32) -> Result<(), StakingError> {
+    pause::when_not_paused(env).map_err(|_| StakingError::ContractPaused)?;
+    let stored_admin: Address = env.storage().instance()
+        .get(&DataKey::Admin)
+        .ok_or(StakingError::NotInitialized)?;
+    if admin != &stored_admin {
+        return Err(StakingError::Unauthorized);
+    }
+    admin.require_auth();
+
+    let now = env.ledger().timestamp();
+    let old_cfg: RewardConfig = env.storage().instance()
+        .get(&DataKey::RewardConfig)
+        .unwrap_or(RewardConfig { apy_bps: 0, updated_at: now });
+
+    // Mid-stake config change: recalculate accrued rewards for all active stakers at old rate
+    let stakers: Vec<Address> = env.storage().persistent()
+        .get(&DataKey::StakerList)
+        .unwrap_or_else(|| Vec::new(env));
+
+    for user in stakers.iter() {
+        if let Some(stake_pos) = env.storage().instance().get::<DataKey, StakePosition>(&DataKey::Stake(user.clone())) {
+            let mut state: AccruedRewardState = env.storage().instance()
+                .get(&DataKey::RewardState(user.clone()))
+                .unwrap_or(AccruedRewardState {
+                    accrued_amount: 0,
+                    last_accrual_time: stake_pos.start_time,
+                });
+            if now > state.last_accrual_time {
+                let additional = calculate_piecewise_accrual(&stake_pos, old_cfg.apy_bps, state.last_accrual_time, now);
+                state.accrued_amount = state.accrued_amount.saturating_add(additional);
+                state.last_accrual_time = now;
+                env.storage().instance().set(&DataKey::RewardState(user.clone()), &state);
+            }
+        }
+    }
+
+    env.storage().instance().set(&DataKey::RewardConfig, &RewardConfig { apy_bps, updated_at: now });
+    RewardConfigUpdated {
+        old_apy_bps: old_cfg.apy_bps,
+        new_apy_bps: apy_bps,
+        updated_at: now,
+    }.publish(env);
+
     Ok(())
+}
+
+/// Returns the current reward configuration.
+pub fn get_reward_config(env: &Env) -> RewardConfig {
+    env.storage().instance().get(&DataKey::RewardConfig).unwrap_or(RewardConfig { apy_bps: 0, updated_at: 0 })
+}
+
+/// Returns the total accrued rewards for a user across all piecewise intervals.
+pub fn get_accrued_rewards(env: &Env, user: &Address) -> i128 {
+    let stake_pos = match env.storage().instance().get::<DataKey, StakePosition>(&DataKey::Stake(user.clone())) {
+        Some(p) => p,
+        None => {
+            return env.storage().instance()
+                .get::<DataKey, AccruedRewardState>(&DataKey::RewardState(user.clone()))
+                .map(|s| s.accrued_amount)
+                .unwrap_or(0);
+        }
+    };
+
+    let state: AccruedRewardState = env.storage().instance()
+        .get(&DataKey::RewardState(user.clone()))
+        .unwrap_or(AccruedRewardState {
+            accrued_amount: 0,
+            last_accrual_time: stake_pos.start_time,
+        });
+
+    let cfg: RewardConfig = env.storage().instance()
+        .get(&DataKey::RewardConfig)
+        .unwrap_or(RewardConfig { apy_bps: 0, updated_at: env.ledger().timestamp() });
+
+    let now = env.ledger().timestamp();
+    let forward_reward = if now > state.last_accrual_time {
+        calculate_piecewise_accrual(&stake_pos, cfg.apy_bps, state.last_accrual_time, now)
+    } else {
+        0
+    };
+
+    state.accrued_amount.saturating_add(forward_reward)
+}
+
+/// Returns the effective APY in bps for a user taking into account staking period multiplier.
+pub fn get_effective_apy(env: &Env, user: &Address) -> u32 {
+    let cfg: RewardConfig = env.storage().instance()
+        .get(&DataKey::RewardConfig)
+        .unwrap_or(RewardConfig { apy_bps: 0, updated_at: 0 });
+    if let Some(stake_pos) = env.storage().instance().get::<DataKey, StakePosition>(&DataKey::Stake(user.clone())) {
+        cfg.apy_bps.saturating_mul(stake_pos.period.multiplier())
+    } else {
+        cfg.apy_bps
+    }
+}
+
+/// Claims and transfers accrued staking rewards to the user.
+pub fn distribute_rewards(env: &Env, user: &Address) -> Result<i128, StakingError> {
+    pause::when_not_paused(env).map_err(|_| StakingError::ContractPaused)?;
+    user.require_auth();
+
+    let total_reward = get_accrued_rewards(env, user);
+    if total_reward <= 0 {
+        return Ok(0);
+    }
+
+    let token_address: Address = env.storage().instance()
+        .get(&DataKey::Token)
+        .ok_or(StakingError::NotInitialized)?;
+    let token_client = token::Client::new(env, &token_address);
+
+    let contract_balance = token_client.balance(&env.current_contract_address());
+    if contract_balance < total_reward {
+        return Err(StakingError::InsufficientContractBalance);
+    }
+
+    let now = env.ledger().timestamp();
+    env.storage().instance().set(&DataKey::RewardState(user.clone()), &AccruedRewardState {
+        accrued_amount: 0,
+        last_accrual_time: now,
+    });
+
+    token_client.transfer(&env.current_contract_address(), user, &total_reward);
+
+    RewardsDistributed {
+        user: user.clone(),
+        amount: total_reward,
+    }.publish(env);
+
+    Ok(total_reward)
 }

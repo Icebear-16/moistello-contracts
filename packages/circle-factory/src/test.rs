@@ -3,7 +3,7 @@
 use soroban_sdk::testutils::{Address as _, Events};
 use soroban_sdk::{Address, BytesN, Env};
 use std::sync::atomic::{AtomicU32, Ordering};
-use crate::{CircleFactory, CircleFactoryClient}; use crate::types::{CircleConfig, FactoryError};
+use crate::{CircleFactory, CircleFactoryClient}; use crate::types::{CircleConfig, FactoryError, MAX_DEPLOY_FEE};
 
 fn install_wasm_hash(env: &Env) -> BytesN<32> {
     // Test fixture wasm: the circle contract built from this workspace
@@ -46,7 +46,7 @@ fn setup(env: &Env) -> (CircleFactoryClient, Address, BytesN<32>) {
     let client = CircleFactoryClient::new(env, &contract_id);
     let admin = Address::generate(env);
     let wh = install_wasm_hash(env);
-    client.init(&admin, &500i128, &wh);
+    client.init(&admin, &500i128, &wh, &None, &None);
     (client, admin, wh)
 }
 
@@ -59,7 +59,7 @@ fn test_init_stores_admin_and_config() {
     let admin = Address::generate(&env);
     let wh = install_wasm_hash(&env);
 
-    client.init(&admin, &300i128, &wh);
+    client.init(&admin, &300i128, &wh, &None, &None);
 
     assert_eq!(client.get_circle_count(), 0);
     let fc = client.get_fee_config();
@@ -85,7 +85,7 @@ fn test_init_rejects_invalid_fee_bps() {
     let admin = Address::generate(&env);
     let wh = install_wasm_hash(&env);
 
-    let result = client.try_init(&admin, &10001i128, &wh);
+    let result = client.try_init(&admin, &10001i128, &wh, &None, &None);
     assert_eq!(result, Err(Ok(FactoryError::InvalidFeeBps)));
 }
 
@@ -204,7 +204,7 @@ fn test_builtin_templates_present_after_init() {
     let client = CircleFactoryClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let wh = install_wasm_hash(&env);
-    client.init(&admin, &500i128, &wh);
+    client.init(&admin, &500i128, &wh, &None, &None);
 
     let templates = client.get_templates();
     assert_eq!(templates.len(), 3);
@@ -375,4 +375,147 @@ fn test_migrate_circles_batch_counts_processed_circles() {
     assert_eq!(client.migrate_circles(&admin, &1, &1), 1);
     assert_eq!(client.migrate_circles(&admin, &5, &10), 0);
     assert_eq!(client.migrate_circles(&admin, &0, &0), 0);
+}
+
+#[test]
+fn test_init_enforces_deploy_fee_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+
+    let result = client.try_init(
+        &admin,
+        &500i128,
+        &wh,
+        &Some(MAX_DEPLOY_FEE + 1),
+        &Some(treasury.clone()),
+    );
+    assert_eq!(result, Err(Ok(FactoryError::DeployFeeExceedsCap)));
+}
+
+#[test]
+fn test_init_rejects_negative_deploy_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+
+    let result = client.try_init(
+        &admin,
+        &500i128,
+        &wh,
+        &Some(-1),
+        &Some(treasury),
+    );
+    assert_eq!(result, Err(Ok(FactoryError::DeployFeeExceedsCap)));
+}
+
+#[test]
+fn test_init_requires_treasury_when_fee_positive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+
+    let result = client.try_init(
+        &admin,
+        &500i128,
+        &wh,
+        &Some(100),
+        &None,
+    );
+    assert_eq!(result, Err(Ok(FactoryError::InvalidTreasury)));
+}
+
+#[test]
+fn test_deploy_circle_zero_fee_free_deployment() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+
+    // Initialize with zero fee
+    client.init(&admin, &500i128, &wh, &Some(0), &None);
+    assert_eq!(client.get_deploy_fee(), 0);
+    assert_eq!(client.get_treasury(), None);
+
+    let organizer = Address::generate(&env);
+    let config = sample_config(&env, &organizer);
+
+    // Zero fee deployment succeeds without charging organizer
+    let circle_id = client.deploy_circle(&config);
+    assert_eq!(client.get_circle_count(), 1);
+    assert_eq!(client.get_circles().circles.get(0).unwrap().circle_id, circle_id);
+}
+
+#[test]
+fn test_deploy_circle_charges_fee_and_routes_to_treasury() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+
+    let deploy_fee = 50_0000000i128;
+    client.init(&admin, &500i128, &wh, &Some(deploy_fee), &Some(treasury.clone()));
+    assert_eq!(client.get_deploy_fee(), deploy_fee);
+    assert_eq!(client.get_treasury(), Some(treasury.clone()));
+
+    // Set up token and fund organizer
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract_v2(token_admin.clone()).address();
+    let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+
+    let organizer = Address::generate(&env);
+    token_admin_client.mint(&organizer, &100_0000000);
+
+    let mut config = sample_config(&env, &organizer);
+    config.token = token.clone();
+
+    // Deploy circle and verify fee transferred to treasury
+    let circle_id = client.deploy_circle(&config);
+    assert_eq!(client.get_circle_count(), 1);
+    assert_eq!(client.get_circles().circles.get(0).unwrap().circle_id, circle_id);
+
+    assert_eq!(token_client.balance(&organizer), 50_0000000);
+    assert_eq!(token_client.balance(&treasury), 50_0000000);
+}
+
+#[test]
+fn test_set_deploy_fee_admin_and_cap() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    let treasury = Address::generate(&env);
+
+    // Update deploy fee by admin
+    assert!(client.try_set_deploy_fee(&admin, &200_0000000, &Some(treasury.clone())).is_ok());
+    assert_eq!(client.get_deploy_fee(), 200_0000000);
+    assert_eq!(client.get_treasury(), Some(treasury.clone()));
+
+    // Reject non-admin
+    let stranger = Address::generate(&env);
+    let r = client.try_set_deploy_fee(&stranger, &100_0000000, &Some(treasury.clone()));
+    assert_eq!(r, Err(Ok(FactoryError::Unauthorized)));
+
+    // Reject exceeding cap
+    let r_cap = client.try_set_deploy_fee(&admin, &(MAX_DEPLOY_FEE + 1), &Some(treasury.clone()));
+    assert_eq!(r_cap, Err(Ok(FactoryError::DeployFeeExceedsCap)));
+
+    // Reject missing treasury when fee > 0
+    let r_no_treasury = client.try_set_deploy_fee(&admin, &100, &None);
+    assert_eq!(r_no_treasury, Err(Ok(FactoryError::InvalidTreasury)));
 }

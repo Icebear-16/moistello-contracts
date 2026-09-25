@@ -2141,6 +2141,15 @@
               },
               {
                 "symbol": "payout"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+              },
+              {
+                "u32": 0
+              },
+              {
+                "u32": 1
               }
             ],
             "data": {

@@ -1193,21 +1193,6 @@ pub fn cancel_circle(env: &Env, caller: &Address) -> Result<(), CircleError> {
             }
         }
     }
-    env.storage()
-        .instance()
-        .set(&DataKey::Circle, &stored_circle);
-    for mi in 0..members_vec.len() {
-        let member = members_vec.get(mi).ok_or(CircleError::VecAccessError)?;
-        env.events().publish(
-            (env.current_contract_address(), symbol_short!("joined")),
-            MemberJoined {
-                member: member.address.clone(),
-                position: member.position,
-            },
-        );
-    }
-    Ok(())
-}
 
     circle.status = STATUS_CANCELLED;
     env.storage().instance().set(&DataKey::Circle, &circle);
@@ -2081,39 +2066,6 @@ pub fn batch_payout(
     if recipients.len() == 0 || recipients.len() > 10 || recipients.len() != amounts.len() {
         return Err(CircleError::InvalidAmount);
     }
-    if bonus_pct > 10000 {
-        return Err(CircleError::InvalidAmount);
-    }
-    let mut referrals: Vec<Referral> = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Referrals)
-        .unwrap_or_else(|| Vec::new(env));
-    for i in 0..referrals.len() {
-        let r = referrals.get(i).ok_or(CircleError::VecAccessError)?;
-        if r.referrer == *referrer && r.referred == *referred {
-            return Err(CircleError::AlreadyMember);
-        }
-    }
-    referrals.push_back(Referral {
-        referrer: referrer.clone(),
-        referred: referred.clone(),
-        bonus_pct,
-        timestamp: env.ledger().timestamp(),
-    });
-    env.storage()
-        .persistent()
-        .set(&DataKey::Referrals, &referrals);
-    env.events().publish(
-        (env.current_contract_address(), symbol_short!("referral")),
-        ReferralRegistered {
-            referrer: referrer.clone(),
-            referred: referred.clone(),
-            bonus_pct,
-        },
-    );
-    Ok(())
-}
 
     // Get fee_bps from storage (#256)
     let fee_bps: u32 = env
@@ -3023,3 +2975,181 @@ pub fn get_yield_rate(env: &Env, round: u32) -> Result<i128, CircleError> {
 pub fn check_oracle_source(env: &Env, oracle: &Address) -> Result<(), CircleError> {
     oracle::validate_oracle_source(env, oracle)
 }
+
+/// Proposes or votes on replacing an inactive organizer with a new organizer (#450).
+/// Requires a supermajority of active circle members (>= 2/3).
+/// Executes immediately once the supermajority threshold is reached.
+/// The old organizer retains their active membership rights.
+pub fn propose_organizer_replacement(
+    env: &Env,
+    caller: &Address,
+    new_organizer: &Address,
+) -> Result<(), CircleError> {
+    pause::when_not_paused(env).map_err(|_| CircleError::ContractPaused)?;
+    let _guard = ReentrancyGuard::new(env).map_err(|_| CircleError::NotActive)?;
+    validate_addr(env, caller)?;
+    validate_addr(env, new_organizer)?;
+    caller.require_auth();
+
+    let mut circle: Circle = env
+        .storage()
+        .instance()
+        .get(&DataKey::Circle)
+        .ok_or(CircleError::NotInitialized)?;
+
+    if circle.status == STATUS_CANCELLED || circle.status == STATUS_COMPLETED {
+        return Err(CircleError::NotActive);
+    }
+    if new_organizer == &circle.organizer {
+        return Err(CircleError::InvalidAddress);
+    }
+
+    let members: Vec<Member> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Members)
+        .ok_or(CircleError::NotInitialized)?;
+
+    let mut is_active_member = false;
+    let mut active_count: u32 = 0;
+    for i in 0..members.len() {
+        let m = members.get(i).ok_or(CircleError::VecAccessError)?;
+        if m.status == MEMBER_ACTIVE {
+            active_count = active_count.checked_add(1).ok_or(CircleError::InvalidAmount)?;
+            if &m.address == caller {
+                is_active_member = true;
+            }
+        }
+    }
+
+    if !is_active_member {
+        return Err(CircleError::NotMember);
+    }
+
+    // Supermajority threshold: >= 2/3 of active members (ceiling)
+    let threshold = (active_count.checked_mul(2).ok_or(CircleError::InvalidAmount)? + 2) / 3;
+
+    let candidate_opt: Option<Address> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::OrganizerCandidate);
+
+    let mut votes: Vec<Address> = if candidate_opt.as_ref() == Some(new_organizer) {
+        env.storage()
+            .persistent()
+            .get(&DataKey::OrganizerVotes)
+            .unwrap_or_else(|| Vec::new(env))
+    } else {
+        Vec::new(env)
+    };
+
+    for i in 0..votes.len() {
+        let v = votes.get(i).ok_or(CircleError::VecAccessError)?;
+        if &v == caller {
+            return Err(CircleError::AlreadyVoted);
+        }
+    }
+
+    votes.push_back(caller.clone());
+
+    if votes.len() >= threshold {
+        let old_organizer = circle.organizer.clone();
+        circle.organizer = new_organizer.clone();
+
+        if let Some(stored_admin) = env.storage().instance().get::<DataKey, Address>(&DataKey::Admin) {
+            if stored_admin == old_organizer {
+                env.storage().instance().set(&DataKey::Admin, new_organizer);
+            }
+        }
+
+        env.storage().instance().set(&DataKey::Circle, &circle);
+        env.storage().persistent().remove(&DataKey::OrganizerCandidate);
+        env.storage().persistent().remove(&DataKey::OrganizerVotes);
+
+        env.events().publish(
+            (
+                env.current_contract_address(),
+                symbol_short!("org_rep"),
+                new_organizer.clone(),
+            ),
+            OrganizerReplaced {
+                old_organizer,
+                new_organizer: new_organizer.clone(),
+            },
+        );
+    } else {
+        env.storage()
+            .persistent()
+            .set(&DataKey::OrganizerCandidate, new_organizer);
+        env.storage()
+            .persistent()
+            .set(&DataKey::OrganizerVotes, &votes);
+    }
+    Ok(())
+}
+
+/// Enforces strictly monotonic round advance with explicit state machine checks (#448).
+/// Rejects stale, out-of-order, or regressive round submissions.
+pub fn advance_round(
+    env: &Env,
+    caller: &Address,
+    from_round: u32,
+) -> Result<u32, CircleError> {
+    pause::when_not_paused(env).map_err(|_| CircleError::ContractPaused)?;
+    let _guard = ReentrancyGuard::new(env).map_err(|_| CircleError::NotActive)?;
+    validate_addr(env, caller)?;
+
+    let mut circle: Circle = env
+        .storage()
+        .instance()
+        .get(&DataKey::Circle)
+        .ok_or(CircleError::NotInitialized)?;
+
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(CircleError::NotInitialized)?;
+
+    if caller != &circle.organizer && caller != &stored_admin {
+        return Err(CircleError::Unauthorized);
+    }
+    caller.require_auth();
+
+    if circle.status != STATUS_ACTIVE {
+        return Err(CircleError::NotActive);
+    }
+
+    if from_round != circle.current_round {
+        return Err(CircleError::RoundNotCurrent);
+    }
+
+    let next_round = circle
+        .current_round
+        .checked_add(1)
+        .ok_or(CircleError::InvalidAmount)?;
+
+    if next_round <= circle.current_round {
+        return Err(CircleError::InvalidRound);
+    }
+
+    circle.current_round = next_round;
+    if circle.current_round >= circle.total_rounds {
+        circle.status = STATUS_COMPLETED;
+    }
+
+    env.storage().instance().set(&DataKey::Circle, &circle);
+    analytics::record_round_completed(env, &circle)?;
+
+    env.events().publish(
+        (
+            env.current_contract_address(),
+            symbol_short!("rnd_adv"),
+            caller.clone(),
+        ),
+        next_round,
+    );
+
+    Ok(next_round)
+}
+

@@ -74,6 +74,26 @@ impl Staking {
     pub fn update_admin(env: Env, current_admin: Address, new_admin: Address) -> Result<(), types::StakingError> {
         contract::update_admin(&env, &current_admin, &new_admin)
     }
+
+    pub fn set_reward_config(env: Env, admin: Address, apy_bps: u32) -> Result<(), types::StakingError> {
+        contract::set_reward_config(&env, &admin, apy_bps)
+    }
+
+    pub fn get_reward_config(env: Env) -> types::RewardConfig {
+        contract::get_reward_config(&env)
+    }
+
+    pub fn get_accrued_rewards(env: Env, user: Address) -> i128 {
+        contract::get_accrued_rewards(&env, &user)
+    }
+
+    pub fn get_effective_apy(env: Env, user: Address) -> u32 {
+        contract::get_effective_apy(&env, &user)
+    }
+
+    pub fn distribute_rewards(env: Env, user: Address) -> Result<i128, types::StakingError> {
+        contract::distribute_rewards(&env, &user)
+    }
 }
 
 #[cfg(test)]

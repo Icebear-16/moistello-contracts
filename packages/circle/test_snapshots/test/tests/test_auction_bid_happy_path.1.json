@@ -1311,6 +1311,12 @@
               },
               {
                 "symbol": "bid"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+              },
+              {
+                "u32": 0
               }
             ],
             "data": {

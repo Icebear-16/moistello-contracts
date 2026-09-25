@@ -1217,6 +1217,12 @@
               },
               {
                 "symbol": "vote"
+              },
+              {
+                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+              },
+              {
+                "u32": 0
               }
             ],
             "data": {

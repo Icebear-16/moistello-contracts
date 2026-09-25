@@ -61,35 +61,70 @@ fn deploy_validated(env: &Env, config: &CircleConfig) -> Result<Address, Factory
     Ok(cid)
 }
 
-/// Initializes the circle factory with admin, fee configuration, and WASM hash.
+/// Initializes the circle factory with admin, fee configuration, WASM hash, and optional deployment fee.
 ///
 /// # Parameters
 /// - `env`: Contract execution environment
 /// - `admin`: Administrator address with fee update privileges
 /// - `fee_bps`: Fee in basis points (0-10000, where 10000 = 100%)
 /// - `circle_wasm_hash`: WASM hash of the circle contract to deploy
+/// - `deploy_fee`: Optional deployment fee, capped at `MAX_DEPLOY_FEE`
+/// - `treasury`: Optional treasury address for receiving deployment fees
 ///
 /// # Returns
 /// - `Ok(())` on successful initialization
 /// - `Err(FactoryError::InvalidFeeBps)` if fee_bps < 0 or > 10000
-///
-/// # Authorization
-/// Requires authentication from the admin address.
-///
-/// # Panics
-/// Never panics. All errors are returned as typed FactoryError variants.
-pub fn init(env: &Env, admin: &Address, fee_bps: i128, circle_wasm_hash: &BytesN<32>) -> Result<(), FactoryError> {
+/// - `Err(FactoryError::DeployFeeExceedsCap)` if deploy_fee < 0 or > MAX_DEPLOY_FEE
+/// - `Err(FactoryError::InvalidTreasury)` if deploy_fee > 0 and treasury is None
+pub fn init(
+    env: &Env,
+    admin: &Address,
+    fee_bps: i128,
+    circle_wasm_hash: &BytesN<32>,
+    deploy_fee: Option<i128>,
+    treasury: Option<Address>,
+) -> Result<(), FactoryError> {
     admin.require_auth();
     if fee_bps < 0 || fee_bps > 10_000 { return Err(FactoryError::InvalidFeeBps); }
+    let fee = deploy_fee.unwrap_or(0);
+    if fee < 0 || fee > MAX_DEPLOY_FEE {
+        return Err(FactoryError::DeployFeeExceedsCap);
+    }
+    if fee > 0 && treasury.is_none() {
+        return Err(FactoryError::InvalidTreasury);
+    }
     env.storage().instance().set(&DataKey::Admin, admin);
     env.storage().instance().set(&DataKey::FeeConfig, &FeeConfig { fee_bps, updated_at: env.ledger().timestamp(), updated_by: admin.clone() });
     env.storage().instance().set(&DataKey::WasmHash, circle_wasm_hash);
     env.storage().instance().set(&DataKey::CircleCount, &0u32);
+    env.storage().instance().set(&DataKey::DeployFee, &fee);
+    if let Some(ref t) = treasury {
+        env.storage().instance().set(&DataKey::Treasury, t);
+    }
     let mut templates: Vec<CircleTemplate> = Vec::new(env);
     templates.push_back(builtin_template(env, 1, "Weekly Starter", 100_0000000, 5, 1, 5));
     templates.push_back(builtin_template(env, 2, "Biweekly Standard", 500_0000000, 8, 1, 8));
     templates.push_back(builtin_template(env, 3, "Monthly Premium", 1000_0000000, 12, 1, 12));
     env.storage().persistent().set(&DataKey::Templates, &templates);
+    Ok(())
+}
+
+fn charge_deploy_fee(env: &Env, organizer: &Address, token: &Address) -> Result<(), FactoryError> {
+    let deploy_fee: i128 = env.storage().instance().get(&DataKey::DeployFee).unwrap_or(0);
+    if deploy_fee > 0 {
+        let treasury: Address = env.storage().instance().get(&DataKey::Treasury).ok_or(FactoryError::InvalidTreasury)?;
+        let token_client = soroban_sdk::token::Client::new(env, token);
+        token_client.transfer(organizer, &treasury, &deploy_fee);
+        env.events().publish(
+            (env.current_contract_address(), symbol_short!("fee_paid")),
+            DeployFeePaid {
+                organizer: organizer.clone(),
+                treasury,
+                amount: deploy_fee,
+                token: token.clone(),
+            },
+        );
+    }
     Ok(())
 }
 
@@ -105,34 +140,47 @@ fn builtin_template(env: &Env, id: u32, name: &str, amount: i128, members: u32, 
         defaults: TemplateDefaults { contribution_deadline_seconds: 604800, min_moi_score: 0, collateral_amount: 0, penalty_bps: 500, grace_period_seconds: 86400, max_strikes: 3 },
     }
 }
-/// Deploys a new circle contract with the provided configuration.
-///
-/// # Parameters
-/// - `env`: Contract execution environment
-/// - `config`: Circle configuration including organizer, token, contribution amount, max members, payout type, and rounds
-///
-/// # Returns
-/// - `Ok(Address)` - Address of the newly deployed circle contract
-/// - `Err(FactoryError::ContractPaused)` if factory is paused
-/// - `Err(FactoryError::InvalidConfig)` if config validation fails (max_members < 2, contribution_amount <= 0, total_rounds == 0, or payout_type > 3)
-/// - `Err(FactoryError::WasmHashNotSet)` if WASM hash not configured
-///
-/// # Authorization
-/// Requires authentication from the organizer address specified in config.
-///
-/// # Notes
-/// - Increments circle_count after successful deployment
-/// - Records circle entry in the factory registry
-/// - Emits CircleDeployed event with creator, circle_id, and name
-///
-/// # Panics
-/// Never panics. All errors are returned as typed FactoryError variants.
+
 pub fn deploy_circle(env: &Env, config: &CircleConfig) -> Result<Address, FactoryError> {
     pause::when_not_paused(env).map_err(|_| FactoryError::ContractPaused)?;
     config.organizer.require_auth();
     if config.max_members < 2 || config.contribution_amount <= 0 || config.total_rounds == 0 || config.payout_type > 3 { return Err(FactoryError::InvalidConfig); }
     if config.slug.len() == 0 { return Err(FactoryError::EmptySlug); }
+    charge_deploy_fee(env, &config.organizer, &config.token)?;
     deploy_validated(env, config)
+}
+
+pub fn get_deploy_fee(env: &Env) -> i128 {
+    env.storage().instance().get(&DataKey::DeployFee).unwrap_or(0)
+}
+
+pub fn get_treasury(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Treasury)
+}
+
+pub fn set_deploy_fee(env: &Env, admin: &Address, fee: i128, treasury: Option<Address>) -> Result<(), FactoryError> {
+    pause::when_not_paused(env).map_err(|_| FactoryError::ContractPaused)?;
+    admin.require_auth();
+    let s: Address = env.storage().instance().get(&DataKey::Admin).ok_or(FactoryError::NotInitialized)?;
+    if admin != &s { return Err(FactoryError::Unauthorized); }
+    if fee < 0 || fee > MAX_DEPLOY_FEE {
+        return Err(FactoryError::DeployFeeExceedsCap);
+    }
+    if fee > 0 && treasury.is_none() {
+        return Err(FactoryError::InvalidTreasury);
+    }
+    let old_fee = env.storage().instance().get(&DataKey::DeployFee).unwrap_or(0);
+    env.storage().instance().set(&DataKey::DeployFee, &fee);
+    if let Some(ref t) = treasury {
+        env.storage().instance().set(&DataKey::Treasury, t);
+    } else {
+        env.storage().instance().remove(&DataKey::Treasury);
+    }
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("dep_fee")),
+        DeployFeeConfigUpdated { old_fee, new_fee: fee, treasury },
+    );
+    Ok(())
 }
 
 pub fn get_templates(env: &Env) -> Vec<CircleTemplate> { load_templates(env) }
@@ -184,6 +232,7 @@ pub fn deploy_from_template(env: &Env, template_id: u32, organizer: &Address, to
         slug,
     };
     validate_template_config(&t, &config)?;
+    charge_deploy_fee(env, organizer, token)?;
     let cid = deploy_validated(env, &config)?;
     env.events().publish((env.current_contract_address(), symbol_short!("tmpl_dep")), TemplateDeployed { template_id, circle_id: cid.clone(), creator: organizer.clone() });
     Ok(cid)
@@ -194,6 +243,7 @@ pub fn deploy_from_template_custom(env: &Env, template_id: u32, config: &CircleC
     config.organizer.require_auth();
     let t = find_template(&load_templates(env), template_id)?;
     validate_template_config(&t, config)?;
+    charge_deploy_fee(env, &config.organizer, &config.token)?;
     let cid = deploy_validated(env, config)?;
     env.events().publish((env.current_contract_address(), symbol_short!("tmpl_dep")), TemplateDeployed { template_id, circle_id: cid.clone(), creator: config.organizer.clone() });
     Ok(cid)
