@@ -1193,6 +1193,21 @@ pub fn cancel_circle(env: &Env, caller: &Address) -> Result<(), CircleError> {
             }
         }
     }
+    env.storage()
+        .instance()
+        .set(&DataKey::Circle, &stored_circle);
+    for mi in 0..members_vec.len() {
+        let member = members_vec.get(mi).ok_or(CircleError::VecAccessError)?;
+        env.events().publish(
+            (env.current_contract_address(), symbol_short!("joined")),
+            MemberJoined {
+                member: member.address.clone(),
+                position: member.position,
+            },
+        );
+    }
+    Ok(())
+}
 
     circle.status = STATUS_CANCELLED;
     env.storage().instance().set(&DataKey::Circle, &circle);
@@ -2066,6 +2081,39 @@ pub fn batch_payout(
     if recipients.len() == 0 || recipients.len() > 10 || recipients.len() != amounts.len() {
         return Err(CircleError::InvalidAmount);
     }
+    if bonus_pct > 10000 {
+        return Err(CircleError::InvalidAmount);
+    }
+    let mut referrals: Vec<Referral> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Referrals)
+        .unwrap_or_else(|| Vec::new(env));
+    for i in 0..referrals.len() {
+        let r = referrals.get(i).ok_or(CircleError::VecAccessError)?;
+        if r.referrer == *referrer && r.referred == *referred {
+            return Err(CircleError::AlreadyMember);
+        }
+    }
+    referrals.push_back(Referral {
+        referrer: referrer.clone(),
+        referred: referred.clone(),
+        bonus_pct,
+        timestamp: env.ledger().timestamp(),
+    });
+    env.storage()
+        .persistent()
+        .set(&DataKey::Referrals, &referrals);
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("referral")),
+        ReferralRegistered {
+            referrer: referrer.clone(),
+            referred: referred.clone(),
+            bonus_pct,
+        },
+    );
+    Ok(())
+}
 
     // Get fee_bps from storage (#256)
     let fee_bps: u32 = env
