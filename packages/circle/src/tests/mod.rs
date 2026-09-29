@@ -10,6 +10,9 @@ mod test_security_hardening;
 mod test_stress;
 
 #[cfg(test)]
+mod test_vote;
+
+#[cfg(test)]
 mod tests {
     use soroban_sdk::{Address, Env};
 

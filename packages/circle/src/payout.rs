@@ -110,8 +110,17 @@ pub fn resolve_vote(env: &Env, circle: &Circle, round: u32) -> Result<Address, C
         .persistent()
         .get(&DataKey::Members)
         .ok_or(CircleError::NotInitialized)?;
-    let active = count_active(env)?;
-    let quorum = (active / 2) + 1;
+    let mut active_members: Map<Address, Member> = Map::new(env);
+    let mut saw_inactive_member = false;
+    for i in 0..members.len() {
+        let m = members.get(i).ok_or(CircleError::VecAccessError)?;
+        if m.status == MEMBER_ACTIVE {
+            active_members.set(m.address.clone(), m);
+        } else {
+            saw_inactive_member = true;
+        }
+    }
+    let quorum = (active_members.len() / 2) + 1;
     let mut tally: Map<Address, u32> = Map::new(env);
     let mut match_count: u32 = 0;
     for i in 0..votes.len() {
@@ -127,36 +136,30 @@ pub fn resolve_vote(env: &Env, circle: &Circle, round: u32) -> Result<Address, C
     if match_count < quorum {
         return Err(CircleError::VoteQuorumNotMet);
     }
-    let mut best_addr: Option<Address> = None;
+    let mut best: Option<(Address, Member)> = None;
     let mut best_count: u32 = 0;
     for (addr, count) in tally.iter() {
+        // A vote may name an address that has since exited or defaulted, or one
+        // that was never a member at all. Skip those candidates and fall through
+        // to the next-highest tally rather than paying an ineligible address.
+        let m = match active_members.get(addr.clone()) {
+            Some(m) => m,
+            None => continue,
+        };
         if count > best_count {
             best_count = count;
-            best_addr = Some(addr);
+            best = Some((addr, m));
         }
     }
-    let winner = best_addr.ok_or(CircleError::VoteQuorumNotMet)?;
-    for i in 0..members.len() {
-        let m = members.get(i).ok_or(CircleError::VecAccessError)?;
-        if m.address == winner {
-            ensure_active_unpaid_member(circle, &m)?;
-            return Ok(winner);
+    match best {
+        Some((winner, member)) => {
+            ensure_active_unpaid_member(circle, &member)?;
+            Ok(winner)
         }
+        // Nobody voted for an eligible member. If the circle still holds a
+        // departed member, surface that specific condition so callers can tell
+        // "voted for someone who left" apart from "voted for a non-member".
+        None if saw_inactive_member => Err(CircleError::InvalidMemberStatus),
+        None => Err(CircleError::NotMember),
     }
-    Err(CircleError::NotMember)
-}
-
-fn count_active(env: &Env) -> Result<u32, CircleError> {
-    let members: Vec<Member> = env
-        .storage()
-        .persistent()
-        .get(&DataKey::Members)
-        .ok_or(CircleError::NotInitialized)?;
-    let mut c: u32 = 0;
-    for i in 0..members.len() {
-        if members.get(i).ok_or(CircleError::NotInitialized)?.status == MEMBER_ACTIVE {
-            c = c.checked_add(1).ok_or(CircleError::InvalidAmount)?;
-        }
-    }
-    Ok(c)
 }
