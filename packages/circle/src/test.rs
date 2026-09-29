@@ -1345,6 +1345,59 @@ mod tests {
         let out_of_range = client.get_contributions(&m1, &100u32, &10u32);
         assert_eq!(out_of_range.len(), 0);
     }
+
+    #[test]
+    fn test_configure_from_factory_sets_protocol_config() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let config = create_config(&env);
+        let admin = config.organizer.clone();
+        let factory = Address::generate(&env);
+        let circle_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+        let client = circle::CircleClient::new(&env, &circle_id);
+        let treasury = Address::generate(&env);
+        let reputation_registry = Address::generate(&env);
+
+        client.configure_from_factory(&factory, &treasury, &reputation_registry, &750u32);
+
+        assert_eq!(client.get_treasury(), Some(treasury));
+        assert_eq!(client.get_reputation_registry(), Some(reputation_registry));
+        assert_eq!(client.get_fee_bps(), 750);
+    }
+
+    #[test]
+    fn test_configure_from_factory_rejects_invalid_configuration() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let config = create_config(&env);
+        let admin = config.organizer.clone();
+        let factory = Address::generate(&env);
+        let circle_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+        let client = circle::CircleClient::new(&env, &circle_id);
+        let treasury = Address::generate(&env);
+        let reputation_registry = Address::generate(&env);
+
+        // Only the factory recorded at construction may configure the circle
+        let impostor = Address::generate(&env);
+        let unauthorized =
+            client.try_configure_from_factory(&impostor, &treasury, &reputation_registry, &750u32);
+        assert_eq!(unauthorized, Err(Ok(CircleError::Unauthorized)));
+
+        // Fee above the 10_000 bps ceiling is rejected
+        let invalid_fee = client.try_configure_from_factory(
+            &factory,
+            &treasury,
+            &reputation_registry,
+            &10_001u32,
+        );
+        assert_eq!(invalid_fee, Err(Ok(CircleError::InvalidAmount)));
+
+        // A paused circle rejects configuration
+        client.pause_circle(&admin);
+        let paused =
+            client.try_configure_from_factory(&factory, &treasury, &reputation_registry, &750u32);
+        assert_eq!(paused, Err(Ok(CircleError::ContractPaused)));
+    }
 }
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Ledger as _;
