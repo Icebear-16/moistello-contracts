@@ -2700,6 +2700,85 @@ pub fn set_treasury(env: &Env, admin: &Address, treasury: &Address) -> Result<()
     env.storage().instance().set(&DataKey::Treasury, treasury);
     Ok(())
 }
+
+/// The all-zero address, which is never a valid contract address.
+fn zero_address(env: &Env) -> Address {
+    Address::from_string(&soroban_sdk::String::from_str(
+        env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    ))
+}
+
+/// Applies the protocol config pushed by the factory that deployed this circle.
+///
+/// Only callable by the factory recorded at construction, so an organizer
+/// cannot repoint the treasury or the reputation registry after the fact.
+///
+/// # Returns
+/// - `Err(CircleError::Unauthorized)` if caller is not the deploying factory
+/// - `Err(CircleError::ContractPaused)` if the circle is paused
+/// - `Err(CircleError::InvalidAmount)` if `fee_bps` > 10000, or either address
+///   is the all-zero address
+///
+/// # Authorization
+/// Requires authentication from the stored factory address.
+///
+/// # Notes
+/// Rejects the all-zero address for `treasury` and `reputation_registry`, which
+/// can never be a real contract and would strand fees or disable reputation.
+///
+/// # Panics
+/// Never panics. All errors are returned as typed CircleError variants.
+pub fn configure_from_factory(
+    env: &Env,
+    factory: &Address,
+    treasury: &Address,
+    reputation_registry: &Address,
+    fee_bps: u32,
+) -> Result<(), CircleError> {
+    factory.require_auth();
+    let stored_factory: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Factory)
+        .ok_or(CircleError::NotInitialized)?;
+    if factory != &stored_factory {
+        return Err(CircleError::Unauthorized);
+    }
+    pause::when_not_paused(env).map_err(|_| CircleError::ContractPaused)?;
+    let zero = zero_address(env);
+    if *treasury == zero || *reputation_registry == zero {
+        return Err(CircleError::InvalidAmount);
+    }
+    if fee_bps > 10_000 {
+        return Err(CircleError::InvalidAmount);
+    }
+    env.storage().instance().set(&DataKey::Treasury, treasury);
+    env.storage()
+        .instance()
+        .set(&DataKey::ReputationRegistry, reputation_registry);
+    env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("fcfg")),
+        FactoryConfigured {
+            factory: factory.clone(),
+            treasury: treasury.clone(),
+            reputation_registry: reputation_registry.clone(),
+            fee_bps,
+        },
+    );
+    Ok(())
+}
+
+/// Returns the treasury this circle routes fees to, if configured.
+pub fn get_treasury(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Treasury)
+}
+
+/// Returns the fee this circle charges on payout, in basis points.
+pub fn get_fee_bps(env: &Env) -> u32 {
+    env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
+}
 /// Updates the token address used for contributions and payouts.
 ///
 /// # Parameters

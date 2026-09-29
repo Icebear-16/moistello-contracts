@@ -2,11 +2,24 @@
 
 use crate::types::{CircleConfig, FactoryError};
 use crate::{CircleFactory, CircleFactoryClient};
+use circle::CircleError;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, BytesN, Env};
 
+fn zero_address(env: &Env) -> Address {
+    Address::from_string(&soroban_sdk::String::from_str(
+        env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    ))
+}
+
 fn install_wasm_hash(env: &Env) -> BytesN<32> {
-    env.budget().reset_unlimited();
+    // Test fixture wasm: the circle contract built from this workspace
+    // (packages/circle-factory/test_wasm/contract.wasm). The factory invokes
+    // its constructor during deploy_v2, so the fixture must accept
+    // (admin, factory, config) constructor arguments.
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
     let wasm: &[u8] = include_bytes!("../test_wasm/contract.wasm");
     env.deployer().upload_contract_wasm(wasm)
 }
@@ -36,6 +49,13 @@ fn sample_config_with_slug(env: &Env, organizer: &Address, slug: &str) -> Circle
     config
 }
 
+/// Sets the protocol config that `deploy_circle` propagates into new circles.
+fn configure_protocol(client: &CircleFactoryClient, env: &Env, admin: &Address, fee_bps: u32) {
+    let treasury = Address::generate(env);
+    let registry = Address::generate(env);
+    client.set_factory_config(admin, &treasury, &registry, &fee_bps);
+}
+
 fn setup(env: &Env) -> (CircleFactoryClient, Address, BytesN<32>) {
     env.mock_all_auths();
     let contract_id = env.register(CircleFactory, ());
@@ -43,6 +63,7 @@ fn setup(env: &Env) -> (CircleFactoryClient, Address, BytesN<32>) {
     let admin = Address::generate(env);
     let wh = install_wasm_hash(env);
     client.init(&admin, &500i128, &wh, &0u32, &0u64);
+    configure_protocol(&client, env, &admin, 500);
     (client, admin, wh)
 }
 
@@ -57,6 +78,7 @@ fn setup_with_rate_limit(
     let admin = Address::generate(env);
     let wh = install_wasm_hash(env);
     client.init(&admin, &500i128, &wh, &limit, &period_secs);
+    configure_protocol(&client, env, &admin, 500);
     (client, admin, wh)
 }
 
@@ -333,4 +355,176 @@ fn test_rate_limit_independent_per_organizer() {
         .try_deploy_circle(&sample_config(&env, &org2))
         .is_ok());
     assert_eq!(client.get_circle_count(), 2);
+}
+
+// ── Protocol config propagation (#104) ───────────────────────────────────────
+
+#[test]
+fn test_get_factory_config_returns_none_when_uninitialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    assert_eq!(client.get_factory_config(), None);
+}
+
+#[test]
+fn test_init_with_config_stores_protocol_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+    let treasury = Address::generate(&env);
+    let registry = Address::generate(&env);
+
+    client.init_with_config(&admin, &250i128, &treasury, &registry, &wh);
+
+    let cfg = client.get_factory_config().unwrap();
+    assert_eq!(cfg.treasury, treasury);
+    assert_eq!(cfg.reputation_registry, registry);
+    assert_eq!(cfg.fee_bps, 250);
+    assert_eq!(client.get_fee_config().fee_bps, 250);
+}
+
+#[test]
+fn test_init_with_config_rejects_zero_addresses() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+    let zero = zero_address(&env);
+    let registry = Address::generate(&env);
+
+    assert_eq!(
+        client.try_init_with_config(&admin, &100i128, &zero, &registry, &wh),
+        Err(Ok(FactoryError::InvalidAddress))
+    );
+    assert_eq!(
+        client.try_init_with_config(&admin, &100i128, &registry, &zero, &wh),
+        Err(Ok(FactoryError::InvalidAddress))
+    );
+}
+
+#[test]
+fn test_deploy_circle_requires_protocol_config() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(CircleFactory, ());
+    let client = CircleFactoryClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let wh = install_wasm_hash(&env);
+    client.init(&admin, &500i128, &wh, &0u32, &0u64);
+
+    let org = Address::generate(&env);
+    assert_eq!(
+        client.try_deploy_circle(&sample_config(&env, &org)),
+        Err(Ok(FactoryError::FactoryConfigNotSet))
+    );
+}
+
+#[test]
+fn test_deploy_circle_propagates_protocol_config_to_circle() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let cfg = client.get_factory_config().unwrap();
+
+    let org = Address::generate(&env);
+    let circle_id = client.deploy_circle(&sample_config(&env, &org));
+
+    let circle = circle::CircleClient::new(&env, &circle_id);
+    assert_eq!(circle.get_treasury(), Some(cfg.treasury.clone()));
+    assert_eq!(circle.get_reputation_registry(), Some(cfg.reputation_registry.clone()));
+    assert_eq!(circle.get_fee_bps(), cfg.fee_bps);
+}
+
+#[test]
+fn test_circle_rejects_configuration_from_a_foreign_caller() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let org = Address::generate(&env);
+    let circle_id = client.deploy_circle(&sample_config(&env, &org));
+    let circle = circle::CircleClient::new(&env, &circle_id);
+
+    let impostor = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let registry = Address::generate(&env);
+    assert_eq!(
+        circle.try_configure_from_factory(&impostor, &treasury, &registry, &900u32),
+        Err(Ok(CircleError::Unauthorized))
+    );
+}
+
+#[test]
+fn test_set_factory_config_rejects_non_admin() {
+    let env = Env::default();
+    let (client, _admin, _wh) = setup(&env);
+    let impostor = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let registry = Address::generate(&env);
+    assert_eq!(
+        client.try_set_factory_config(&impostor, &treasury, &registry, &100u32),
+        Err(Ok(FactoryError::Unauthorized))
+    );
+}
+
+#[test]
+fn test_set_factory_config_rejects_out_of_range_fee() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    let treasury = Address::generate(&env);
+    let registry = Address::generate(&env);
+    assert_eq!(
+        client.try_set_factory_config(&admin, &treasury, &registry, &10_001u32),
+        Err(Ok(FactoryError::InvalidFeeBps))
+    );
+}
+
+#[test]
+fn test_set_factory_config_rejects_zero_addresses() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    let zero = zero_address(&env);
+    let registry = Address::generate(&env);
+    assert_eq!(
+        client.try_set_factory_config(&admin, &zero, &registry, &100u32),
+        Err(Ok(FactoryError::InvalidAddress))
+    );
+    assert_eq!(
+        client.try_set_factory_config(&admin, &registry, &zero, &100u32),
+        Err(Ok(FactoryError::InvalidAddress))
+    );
+}
+
+#[test]
+fn test_set_factory_config_applies_to_later_deployments_only() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    let org = Address::generate(&env);
+    let before_id = client.deploy_circle(&sample_config_with_slug(&env, &org, "before"));
+
+    let treasury = Address::generate(&env);
+    let registry = Address::generate(&env);
+    client.set_factory_config(&admin, &treasury, &registry, &300u32);
+
+    let after_id = client.deploy_circle(&sample_config_with_slug(&env, &org, "after"));
+
+    let before = circle::CircleClient::new(&env, &before_id);
+    let after = circle::CircleClient::new(&env, &after_id);
+    assert_eq!(before.get_fee_bps(), 500);
+    assert_eq!(after.get_fee_bps(), 300);
+    assert_eq!(after.get_treasury(), Some(treasury));
+    assert_eq!(after.get_reputation_registry(), Some(registry));
+}
+
+#[test]
+fn test_set_fee_config_mirrors_into_propagated_config() {
+    let env = Env::default();
+    let (client, admin, _wh) = setup(&env);
+    client.set_fee_config(&admin, &750i128);
+    assert_eq!(client.get_factory_config().unwrap().fee_bps, 750);
+    assert_eq!(client.get_fee_config().fee_bps, 750);
 }

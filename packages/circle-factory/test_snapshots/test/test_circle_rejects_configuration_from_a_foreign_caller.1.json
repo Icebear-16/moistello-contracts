@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 6,
+    "address": 9,
     "nonce": 0,
     "mux_id": 0
   },
@@ -196,7 +196,8 @@
           "sub_invocations": []
         }
       ]
-    ]
+    ],
+    []
   ],
   "ledger": {
     "protocol_version": 26,
@@ -1182,110 +1183,5 @@
       }
     ]
   },
-  "events": [
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "CCRX4OQ3UXOX7JGBK6WF4MAT6SN56MO7NULES43LZLJBU2LPFP2BDBAC",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "address": "CCRX4OQ3UXOX7JGBK6WF4MAT6SN56MO7NULES43LZLJBU2LPFP2BDBAC"
-              },
-              {
-                "symbol": "fcfg"
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "factory"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "fee_bps"
-                  },
-                  "val": {
-                    "u32": 500
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "reputation_registry"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "treasury"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-              },
-              {
-                "symbol": "deploy"
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "circle_id"
-                  },
-                  "val": {
-                    "address": "CCRX4OQ3UXOX7JGBK6WF4MAT6SN56MO7NULES43LZLJBU2LPFP2BDBAC"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "creator"
-                  },
-                  "val": {
-                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "name"
-                  },
-                  "val": {
-                    "string": "Test Circle"
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    }
-  ]
+  "events": []
 }

@@ -142,6 +142,8 @@ substitute_vars() {
   local args="$1"
   args="${args//\{ADMIN_PUBLIC\}/$ADMIN_PUBLIC}"
   args="${args//\{CIRCLE_WASM_HASH\}/${CIRCLE_WASM_HASH:-}}"
+  args="${args//\{TREASURY_ID\}/${CONTRACT_IDS[treasury]:-}}"
+  args="${args//\{REP_ID\}/${CONTRACT_IDS[reputation_registry]:-}}"
   echo "$args"
 }
 

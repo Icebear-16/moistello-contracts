@@ -56,6 +56,35 @@ impl CircleFactory {
     ) -> Result<(), types::FactoryError> {
         contract::set_fee_config(&env, &admin, fee_bps)
     }
+    pub fn init_with_config(
+        env: Env,
+        admin: Address,
+        fee_bps: i128,
+        treasury: Address,
+        reputation_registry: Address,
+        circle_wasm_hash: BytesN<32>,
+    ) -> Result<(), types::FactoryError> {
+        contract::init_with_config(
+            &env,
+            &admin,
+            fee_bps,
+            &treasury,
+            &reputation_registry,
+            &circle_wasm_hash,
+        )
+    }
+    pub fn get_factory_config(env: Env) -> Option<types::FactoryConfig> {
+        contract::get_factory_config(&env)
+    }
+    pub fn set_factory_config(
+        env: Env,
+        admin: Address,
+        treasury: Address,
+        reputation_registry: Address,
+        fee_bps: u32,
+    ) -> Result<(), types::FactoryError> {
+        contract::set_factory_config(&env, &admin, &treasury, &reputation_registry, fee_bps)
+    }
     pub fn pause(env: Env, admin: Address) -> Result<(), types::FactoryError> {
         contract::pause(&env, &admin)
     }

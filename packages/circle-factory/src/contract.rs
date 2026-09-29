@@ -1,9 +1,76 @@
 use crate::types::*;
 use common::pause;
-use soroban_sdk::{symbol_short, xdr::ToXdr, Address, BytesN, Env, Vec};
+use soroban_sdk::{
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
+    symbol_short,
+    xdr::ToXdr,
+    Address, BytesN, Env, IntoVal, Symbol, Vec,
+};
 
 fn canonical_deployment_salt(env: &Env, config: &CircleConfig) -> BytesN<32> {
     env.crypto().sha256(&config.to_xdr(env)).into()
+}
+
+/// Rejects the all-zero address, which can never be a real contract.
+fn validate_config_address(env: &Env, address: &Address) -> Result<(), FactoryError> {
+    let zero = Address::from_string(&soroban_sdk::String::from_str(
+        env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    ));
+    if *address == zero {
+        return Err(FactoryError::InvalidAddress);
+    }
+    Ok(())
+}
+
+/// Reads and revalidates the protocol config propagated into new circles.
+fn load_factory_config(env: &Env) -> Result<FactoryConfig, FactoryError> {
+    let config: FactoryConfig = env
+        .storage()
+        .instance()
+        .get(&DataKey::FactoryConfig)
+        .ok_or(FactoryError::FactoryConfigNotSet)?;
+    if config.fee_bps > 10_000 {
+        return Err(FactoryError::InvalidFeeBps);
+    }
+    validate_config_address(env, &config.treasury)?;
+    validate_config_address(env, &config.reputation_registry)?;
+    Ok(config)
+}
+
+/// Pushes the factory's protocol config into a circle it has just deployed.
+///
+/// The circle only accepts this from the factory recorded at construction, and
+/// the factory authorizes itself as the invoker so the circle's `require_auth`
+/// on the factory address holds.
+fn configure_deployed_circle(
+    env: &Env,
+    circle_id: &Address,
+    config: &FactoryConfig,
+) -> Result<(), FactoryError> {
+    let function_name = Symbol::new(env, "configure_from_factory");
+    let args = soroban_sdk::vec![
+        env,
+        env.current_contract_address().into_val(env),
+        config.treasury.clone().into_val(env),
+        config.reputation_registry.clone().into_val(env),
+        config.fee_bps.into_val(env),
+    ];
+    env.authorize_as_current_contract(soroban_sdk::vec![
+        env,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: circle_id.clone(),
+                fn_name: function_name.clone(),
+                args: args.clone(),
+            },
+            sub_invocations: soroban_sdk::vec![env],
+        }),
+    ]);
+    match env.try_invoke_contract::<(), soroban_sdk::Error>(circle_id, &function_name, args) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) | Err(_) => Err(FactoryError::CircleConfigurationFailed),
+    }
 }
 
 /// Initializes the circle factory with admin, fee configuration, and WASM hash.
@@ -68,6 +135,131 @@ pub fn init(
     );
     Ok(())
 }
+
+/// Initializes the factory and its protocol config in one call.
+///
+/// Equivalent to `init` with an unlimited organizer rate limit, plus the
+/// `FactoryConfig` that `deploy_circle` propagates into every circle it deploys.
+///
+/// # Returns
+/// - `Err(FactoryError::InvalidAddress)` if `treasury` or `reputation_registry`
+///   is the all-zero address.
+/// - `Err(FactoryError::InvalidFeeBps)` if `fee_bps` is out of range.
+///
+/// # Authorization
+/// Requires authentication from the admin address.
+///
+/// # Panics
+/// Never panics. All errors are returned as typed FactoryError variants.
+pub fn init_with_config(
+    env: &Env,
+    admin: &Address,
+    fee_bps: i128,
+    treasury: &Address,
+    reputation_registry: &Address,
+    circle_wasm_hash: &BytesN<32>,
+) -> Result<(), FactoryError> {
+    init(env, admin, fee_bps, circle_wasm_hash, 0, 0)?;
+    validate_config_address(env, treasury)?;
+    validate_config_address(env, reputation_registry)?;
+    let config = FactoryConfig {
+        treasury: treasury.clone(),
+        reputation_registry: reputation_registry.clone(),
+        fee_bps: fee_bps as u32,
+    };
+    env.storage()
+        .instance()
+        .set(&DataKey::FactoryConfig, &config);
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("fcfg")),
+        FactoryConfigUpdated {
+            treasury: treasury.clone(),
+            reputation_registry: reputation_registry.clone(),
+            fee_bps: fee_bps as u32,
+            updated_by: admin.clone(),
+        },
+    );
+    Ok(())
+}
+
+/// Returns the protocol config propagated into newly deployed circles.
+///
+/// # Returns
+/// `Some(FactoryConfig)` once configured, `None` if `init` was used without
+/// `init_with_config` and `set_factory_config` has not been called.
+///
+/// # Panics
+/// Never panics.
+pub fn get_factory_config(env: &Env) -> Option<FactoryConfig> {
+    env.storage().instance().get(&DataKey::FactoryConfig)
+}
+
+/// Updates the protocol config applied to future circle deployments.
+///
+/// Circles already deployed keep the config they were created with; this only
+/// affects subsequent `deploy_circle` calls. Also mirrors `fee_bps` into
+/// `FeeConfig` so fee reporting stays consistent across both views.
+///
+/// # Returns
+/// - `Err(FactoryError::Unauthorized)` if caller is not the admin
+/// - `Err(FactoryError::ContractPaused)` if factory is paused
+/// - `Err(FactoryError::InvalidFeeBps)` if `fee_bps` > 10000
+/// - `Err(FactoryError::InvalidAddress)` if either address is all-zero
+///
+/// # Authorization
+/// Only the stored admin may update the protocol config.
+///
+/// # Panics
+/// Never panics. All errors are returned as typed FactoryError variants.
+pub fn set_factory_config(
+    env: &Env,
+    admin: &Address,
+    treasury: &Address,
+    reputation_registry: &Address,
+    fee_bps: u32,
+) -> Result<(), FactoryError> {
+    admin.require_auth();
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(FactoryError::NotInitialized)?;
+    if admin != &stored_admin {
+        return Err(FactoryError::Unauthorized);
+    }
+    pause::when_not_paused(env).map_err(|_| FactoryError::ContractPaused)?;
+    if fee_bps > 10_000 {
+        return Err(FactoryError::InvalidFeeBps);
+    }
+    validate_config_address(env, treasury)?;
+    validate_config_address(env, reputation_registry)?;
+    let config = FactoryConfig {
+        treasury: treasury.clone(),
+        reputation_registry: reputation_registry.clone(),
+        fee_bps,
+    };
+    env.storage()
+        .instance()
+        .set(&DataKey::FactoryConfig, &config);
+    env.storage().instance().set(
+        &DataKey::FeeConfig,
+        &FeeConfig {
+            fee_bps: fee_bps as i128,
+            updated_at: env.ledger().timestamp(),
+            updated_by: admin.clone(),
+        },
+    );
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("fcfg")),
+        FactoryConfigUpdated {
+            treasury: treasury.clone(),
+            reputation_registry: reputation_registry.clone(),
+            fee_bps,
+            updated_by: admin.clone(),
+        },
+    );
+    Ok(())
+}
 /// Deploys a new circle contract with the provided configuration.
 ///
 /// # Parameters
@@ -100,6 +292,9 @@ pub fn deploy_circle(env: &Env, config: &CircleConfig) -> Result<Address, Factor
     {
         return Err(FactoryError::InvalidConfig);
     }
+    // Load before spending gas on a deployment, and before the rate-limit
+    // counter is charged, so a misconfigured factory cannot burn organizer quota.
+    let factory_config = load_factory_config(env)?;
     let rl: RateLimitConfig = env
         .storage()
         .instance()
@@ -133,6 +328,7 @@ pub fn deploy_circle(env: &Env, config: &CircleConfig) -> Result<Address, Factor
         .deployer()
         .with_current_contract(salt.clone())
         .deploy_v2(wh, (config.organizer.clone(), env.current_contract_address(), config.clone()));
+    configure_deployed_circle(env, &cid, &factory_config)?;
     let now = env.ledger().timestamp();
     let mut circles: Vec<CircleEntry> = env
         .storage()
@@ -304,6 +500,18 @@ pub fn set_fee_config(env: &Env, admin: &Address, fee_bps: i128) -> Result<(), F
             updated_by: admin.clone(),
         },
     );
+    // Keep the propagated config in step, so a fee update through this entry
+    // point is not silently dropped by `deploy_circle`.
+    if let Some(mut factory_config) = env
+        .storage()
+        .instance()
+        .get::<_, FactoryConfig>(&DataKey::FactoryConfig)
+    {
+        factory_config.fee_bps = fee_bps as u32;
+        env.storage()
+            .instance()
+            .set(&DataKey::FactoryConfig, &factory_config);
+    }
     env.events().publish(
         (env.current_contract_address(), symbol_short!("fee_cfg")),
         FeeConfigUpdated {

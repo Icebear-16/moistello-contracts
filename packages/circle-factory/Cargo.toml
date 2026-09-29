@@ -15,4 +15,5 @@ common = { path = "../common" }
 testutils = ["soroban-sdk/testutils"]
 
 [dev-dependencies]
+circle = { path = "../circle" }
 soroban-sdk = { workspace = true, features = ["testutils"] }

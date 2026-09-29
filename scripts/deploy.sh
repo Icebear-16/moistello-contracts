@@ -83,7 +83,7 @@ echo ""
 echo "Initializing deployed contracts..."
 soroban contract invoke --id "$TREASURY_ID" --source "$IDENTITY" --network "$NETWORK" -- init --admin "$ADMIN_PUBLIC" 2>/dev/null || echo "   Treasury already initialized or skipped"
 soroban contract invoke --id "$REP_ID" --source "$IDENTITY" --network "$NETWORK" -- init --admin "$ADMIN_PUBLIC" 2>/dev/null || echo "   Reputation Registry already initialized or skipped"
-soroban contract invoke --id "$FACTORY_ID" --source "$IDENTITY" --network "$NETWORK" -- init --admin "$ADMIN_PUBLIC" --circle_wasm_hash "$CIRCLE_WASM_HASH" 2>/dev/null || echo "   Circle Factory already initialized or skipped"
+soroban contract invoke --id "$FACTORY_ID" --source "$IDENTITY" --network "$NETWORK" -- init_with_config --admin "$ADMIN_PUBLIC" --fee_bps 50 --treasury "$TREASURY_ID" --reputation_registry "$REP_ID" --circle_wasm_hash "$CIRCLE_WASM_HASH" 2>/dev/null || echo "   Circle Factory already initialized or skipped"
 
 echo ""
 echo "=== Deployment Complete ==="

@@ -478,6 +478,15 @@ pub struct OracleFallbackUsed {
     pub primary_oracle: Address,
     pub fallback_oracle: Address,
 }
+/// Emitted when the deploying factory pushes protocol config into a circle.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct FactoryConfigured {
+    pub factory: Address,
+    pub treasury: Address,
+    pub reputation_registry: Address,
+    pub fee_bps: u32,
+}
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct LatePenaltyApplied {
