@@ -111,6 +111,12 @@ impl Circle {
     pub fn cancel(env: Env, caller: Address) -> Result<(), types::CircleError> {
         contract::cancel(&env, &caller)
     }
+    pub fn cancel_auction(env: Env, caller: Address) -> Result<(), types::CircleError> {
+        contract::cancel_auction(&env, &caller)
+    }
+    pub fn query_top_contributors(env: Env, n: u32) -> soroban_sdk::Vec<(Address, i128)> {
+        contract::query_top_contributors(&env, n)
+    }
     pub fn report_late(
         env: Env,
         reporter: Address,

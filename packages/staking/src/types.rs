@@ -1,13 +1,13 @@
-use soroban_sdk::{contracterror, contractevent, contracttype, Address, Vec};
+use soroban_sdk::{contracterror, contractevent, contracttype, Address};
 
 /// Staking period options with corresponding voting power multipliers
 #[contracttype]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum StakingPeriod {
-    OneMonth = 1,      // 1 month = 1x multiplier
-    ThreeMonths = 3,   // 3 months = 2x multiplier
-    SixMonths = 6,     // 6 months = 3x multiplier
+    OneMonth = 1,   // 1 month = 1x multiplier
+    ThreeMonths = 3, // 3 months = 2x multiplier
+    SixMonths = 6,   // 6 months = 3x multiplier
     TwelveMonths = 12, // 12 months = 5x multiplier
 }
 
@@ -48,11 +48,6 @@ impl StakingPeriod {
 /// Unbonding period in seconds (14 days)
 pub const UNBONDING_PERIOD_SECONDS: u64 = 14 * 24 * 60 * 60;
 
-/// Minimum stake accepted by the contract, expressed in stroop-like token units.
-/// Rejecting smaller "dust" positions keeps voting snapshots and staker pages
-/// from being spammed with economically meaningless entries.
-pub const MIN_STAKE_AMOUNT: i128 = 1_0000000;
-
 /// Storage keys for the staking contract
 #[derive(Clone)]
 #[contracttype]
@@ -84,18 +79,6 @@ pub struct StakePosition {
     pub start_time: u64,
     pub unlock_time: u64,
     pub voting_power: i128,
-    pub start_ledger: u32,
-    pub unlock_ledger: u32,
-}
-
-/// Stake query summary for account timing, amount, and accrued rewards
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[contracttype]
-pub struct StakeInfo {
-    pub amount: i128,
-    pub start_ledger: u32,
-    pub unlock_ledger: u32,
-    pub accrued_rewards: i128,
 }
 
 /// User's unbonding position (after unstake initiated)
@@ -175,6 +158,8 @@ pub struct VotingPowerQueried {
     pub voting_power: i128,
 }
 
+/// Event emitted when an active stake is topped up
+#[contractevent(topics = ["top_up"])]
 /// Event emitted when a slash notice is created
 #[contractevent(topics = ["slash_notice"])]
 #[derive(Clone, Debug)]
@@ -207,36 +192,11 @@ pub struct SlashExecuted {
 /// Event emitted when stake is slashed (#523)
 #[contractevent(topics = ["slashed"])]
 #[derive(Clone, Debug)]
-pub struct Slashed {
+pub struct StakeToppedUp {
     #[topic]
     pub user: Address,
-    pub amount: i128,
-    pub shortfall: i128,
-}
-
-// ── #445 — Paginated staker query ────────────────────────────────────────────
-
-/// Maximum number of entries returned by a single `query_stakers_page` call.
-/// Callers that pass a higher `limit` will silently receive at most this many.
-pub const MAX_STAKERS_PAGE_SIZE: u32 = 50;
-
-/// One entry in a `StakersPage`: the staker's address and their current staked amount.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct StakerEntry {
-    pub address: Address,
-    pub amount: i128,
-}
-
-/// Result of `query_stakers_page`.
-///
-/// - `entries`     — up to `MAX_STAKERS_PAGE_SIZE` entries starting at the requested cursor.
-/// - `next_cursor` — pass this as `cursor` in the next call; equals `total` when exhausted.
-/// - `total`       — total number of active stakers at query time.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct StakersPage {
-    pub entries: Vec<StakerEntry>,
-    pub next_cursor: u32,
-    pub total: u32,
+    pub added_amount: i128,
+    pub new_total_amount: i128,
+    pub unlock_time: u64,
+    pub new_voting_power: i128,
 }

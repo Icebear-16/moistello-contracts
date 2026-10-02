@@ -2074,6 +2074,21 @@ fn test_refund_losing_bids_fifty_bidders_in_batches() {
     assert_eq!(client.refund_losing_bids(&organizer, &0u32, &10u32), 0);
 }
 
+#[test]
+fn test_cancel_auction_atomic_refund_and_clear() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin);
+    let mut config = create_config(&env, &token);
+    config.payout_type = crate::types::PAYOUT_AUCTION;
+    let admin = config.organizer.clone();
+    let factory = Address::generate(&env);
+    let contract_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+    let client = CircleClient::new(&env, &contract_id);
+
+    let member_one = Address::generate(&env);
+    let member_two = Address::generate(&env);
 // =============================================================================
 // Issue #466 – enforce minimum circle duration before payout
 // =============================================================================
@@ -2089,6 +2104,147 @@ fn test_trigger_payout_rejects_early_payout() {
     client.join(&member_two);
 
     mint_tokens(&env, &token, &member_one, 100);
+    client.contribute(&member_one, &100_i128, &0_u32);
+    client.auction_bid(&member_one, &500_u32, &0_u32);
+
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+    assert_eq!(token_client.balance(&member_one), 0_i128);
+    assert_eq!(token_client.balance(&client.address), 100_i128);
+
+    // Cancel auction atomically refunds winner and clears bids
+    let res = client.try_cancel_auction(&admin);
+    assert!(res.is_ok());
+
+    // Winner was refunded
+    assert_eq!(token_client.balance(&member_one), 100_i128);
+    assert_eq!(token_client.balance(&client.address), 0_i128);
+
+    // Bids are cleared so member can place a new bid if desired
+    assert!(client.try_auction_bid(&member_one, &600_u32, &0_u32).is_ok());
+}
+
+#[test]
+fn test_cancel_auction_failing_transfer_proves_rollback() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin);
+    let mut config = create_config(&env, &token);
+    config.payout_type = crate::types::PAYOUT_AUCTION;
+    let admin = config.organizer.clone();
+    let factory = Address::generate(&env);
+    let contract_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+    let client = CircleClient::new(&env, &contract_id);
+
+    let member_one = Address::generate(&env);
+    let member_two = Address::generate(&env);
+    client.join(&member_one);
+    client.join(&member_two);
+
+    // Bid placed without funding contract balance
+    client.auction_bid(&member_one, &500_u32, &0_u32);
+
+    // Circle contract has 0 tokens, so refund transfer will fail
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+    assert_eq!(token_client.balance(&client.address), 0_i128);
+
+    let res = client.try_cancel_auction(&admin);
+    assert!(res.is_err());
+
+    // Rollback proof: bids were NOT cleared in storage
+    let duplicate_bid = client.try_auction_bid(&member_one, &600_u32, &0_u32);
+    assert_eq!(duplicate_bid, Err(Ok(CircleError::AlreadyBidded)));
+}
+
+#[test]
+fn test_query_top_contributors_ranking() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin);
+    let mut config = create_config(&env, &token);
+    config.max_members = 3;
+    let admin = config.organizer.clone();
+    let factory = Address::generate(&env);
+    let contract_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+    let client = CircleClient::new(&env, &contract_id);
+
+    let m1 = Address::generate(&env);
+    let m2 = Address::generate(&env);
+    let m3 = Address::generate(&env);
+
+    client.join(&m1);
+    client.join(&m2);
+    client.join(&m3);
+
+    mint_tokens(&env, &token, &m1, 100);
+    mint_tokens(&env, &token, &m2, 100);
+    mint_tokens(&env, &token, &m3, 100);
+
+    // m2 contributes 100 in round 0
+    client.contribute(&m2, &100_i128, &0_u32);
+
+    let top = client.query_top_contributors(&3_u32);
+    assert_eq!(top.len(), 3);
+    assert_eq!(top.get(0).unwrap().0, m2);
+    assert_eq!(top.get(0).unwrap().1, 100_i128);
+}
+
+#[test]
+fn test_query_top_contributors_tie_breaking() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin);
+    let mut config = create_config(&env, &token);
+    config.max_members = 2;
+    let admin = config.organizer.clone();
+    let factory = Address::generate(&env);
+    let contract_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+    let client = CircleClient::new(&env, &contract_id);
+
+    let m1 = Address::generate(&env);
+    let m2 = Address::generate(&env);
+
+    // m1 joins at t=100
+    env.ledger().set_timestamp(100);
+    client.join(&m1);
+
+    // m2 joins at t=200
+    env.ledger().set_timestamp(200);
+    client.join(&m2);
+
+    // Both have 0 contributions: m1 should rank ahead of m2 due to earlier joined_at timestamp
+    let top = client.query_top_contributors(&2_u32);
+    assert_eq!(top.len(), 2);
+    assert_eq!(top.get(0).unwrap().0, m1);
+    assert_eq!(top.get(1).unwrap().0, m2);
+}
+
+#[test]
+fn test_query_top_contributors_bounded_gas() {
+    let env = Env::default();
+    let (client, _admin, _token) = setup_circle(&env);
+    // Asking for 100 entries is safely clamped to MAX_LEADERBOARD_LIMIT (50)
+    let top = client.query_top_contributors(&100_u32);
+    assert!(top.len() <= 50);
+}
+
+#[test]
+fn test_cancel_auction_atomic_refund_and_clear() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin);
+    let mut config = create_config(&env, &token);
+    config.payout_type = crate::types::PAYOUT_AUCTION;
+    let admin = config.organizer.clone();
+    let factory = Address::generate(&env);
+    let contract_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+    let client = CircleClient::new(&env, &contract_id);
+
+    let member_one = Address::generate(&env);
+    let member_two = Address::generate(&env);
     mint_tokens(&env, &token, &member_two, 100);
     client.contribute(&member_one, &100_i128, &0_u32);
     client.contribute(&member_two, &100_i128, &0_u32);
@@ -2109,6 +2265,130 @@ fn test_trigger_payout_succeeds_after_min_duration() {
     client.join(&member_two);
 
     mint_tokens(&env, &token, &member_one, 100);
+    client.contribute(&member_one, &100_i128, &0_u32);
+    client.auction_bid(&member_one, &500_u32, &0_u32);
+
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+    assert_eq!(token_client.balance(&member_one), 0_i128);
+    assert_eq!(token_client.balance(&client.address), 100_i128);
+
+    // Cancel auction atomically refunds winner and clears bids
+    let res = client.try_cancel_auction(&admin);
+    assert!(res.is_ok());
+
+    // Winner was refunded
+    assert_eq!(token_client.balance(&member_one), 100_i128);
+    assert_eq!(token_client.balance(&client.address), 0_i128);
+
+    // Bids are cleared so member can place a new bid if desired
+    assert!(client.try_auction_bid(&member_one, &600_u32, &0_u32).is_ok());
+}
+
+#[test]
+fn test_cancel_auction_failing_transfer_proves_rollback() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin);
+    let mut config = create_config(&env, &token);
+    config.payout_type = crate::types::PAYOUT_AUCTION;
+    let admin = config.organizer.clone();
+    let factory = Address::generate(&env);
+    let contract_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+    let client = CircleClient::new(&env, &contract_id);
+
+    let member_one = Address::generate(&env);
+    let member_two = Address::generate(&env);
+    client.join(&member_one);
+    client.join(&member_two);
+
+    // Bid placed without funding contract balance
+    client.auction_bid(&member_one, &500_u32, &0_u32);
+
+    // Circle contract has 0 tokens, so refund transfer will fail
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+    assert_eq!(token_client.balance(&client.address), 0_i128);
+
+    let res = client.try_cancel_auction(&admin);
+    assert!(res.is_err());
+
+    // Rollback proof: bids were NOT cleared in storage
+    let duplicate_bid = client.try_auction_bid(&member_one, &600_u32, &0_u32);
+    assert_eq!(duplicate_bid, Err(Ok(CircleError::AlreadyBidded)));
+}
+
+#[test]
+fn test_query_top_contributors_ranking() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin);
+    let mut config = create_config(&env, &token);
+    config.max_members = 3;
+    let admin = config.organizer.clone();
+    let factory = Address::generate(&env);
+    let contract_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+    let client = CircleClient::new(&env, &contract_id);
+
+    let m1 = Address::generate(&env);
+    let m2 = Address::generate(&env);
+    let m3 = Address::generate(&env);
+
+    client.join(&m1);
+    client.join(&m2);
+    client.join(&m3);
+
+    mint_tokens(&env, &token, &m1, 100);
+    mint_tokens(&env, &token, &m2, 100);
+    mint_tokens(&env, &token, &m3, 100);
+
+    // m2 contributes 100 in round 0
+    client.contribute(&m2, &100_i128, &0_u32);
+
+    let top = client.query_top_contributors(&3_u32);
+    assert_eq!(top.len(), 3);
+    assert_eq!(top.get(0).unwrap().0, m2);
+    assert_eq!(top.get(0).unwrap().1, 100_i128);
+}
+
+#[test]
+fn test_query_top_contributors_tie_breaking() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token_admin = Address::generate(&env);
+    let token = env.register_stellar_asset_contract(token_admin);
+    let mut config = create_config(&env, &token);
+    config.max_members = 2;
+    let admin = config.organizer.clone();
+    let factory = Address::generate(&env);
+    let contract_id = env.register(Circle, CircleArgs::__constructor(&admin, &factory, &config));
+    let client = CircleClient::new(&env, &contract_id);
+
+    let m1 = Address::generate(&env);
+    let m2 = Address::generate(&env);
+
+    // m1 joins at t=100
+    env.ledger().set_timestamp(100);
+    client.join(&m1);
+
+    // m2 joins at t=200
+    env.ledger().set_timestamp(200);
+    client.join(&m2);
+
+    // Both have 0 contributions: m1 should rank ahead of m2 due to earlier joined_at timestamp
+    let top = client.query_top_contributors(&2_u32);
+    assert_eq!(top.len(), 2);
+    assert_eq!(top.get(0).unwrap().0, m1);
+    assert_eq!(top.get(1).unwrap().0, m2);
+}
+
+#[test]
+fn test_query_top_contributors_bounded_gas() {
+    let env = Env::default();
+    let (client, _admin, _token) = setup_circle(&env);
+    // Asking for 100 entries is safely clamped to MAX_LEADERBOARD_LIMIT (50)
+    let top = client.query_top_contributors(&100_u32);
+    assert!(top.len() <= 50);
     mint_tokens(&env, &token, &member_two, 100);
     client.contribute(&member_one, &100_i128, &0_u32);
     client.contribute(&member_two, &100_i128, &0_u32);

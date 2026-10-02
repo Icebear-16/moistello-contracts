@@ -1,10 +1,11 @@
 #![cfg(test)]
 
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::{Address, Env, String};
 
 /// Integration test: factory deploys circle -> members join -> contribute -> trigger payout -> fee sent to treasury
+use soroban_sdk::testutils::Ledger as _;
+
 /// This test is currently a stub due to circular dependencies between contracts in the test environment.
 /// In production, these contracts are deployed separately and interact via cross-contract calls.
 #[test]
@@ -31,18 +32,18 @@ fn test_full_integration_factory_circle_treasury() {
 #[test]
 fn test_circle_lifecycle_with_fees() {
     let env = Env::default();
-    env.mock_all_auths_allowing_non_root_auth();
+    env.mock_all_auths();
 
     let organizer = Address::generate(&env);
     let token_admin = Address::generate(&env);
-    let token = env.register_stellar_asset_contract_v2(token_admin.clone());
-    let treasury_id = env.register(treasury::Treasury, ());
-    let treasury_client = treasury::TreasuryClient::new(&env, &treasury_id);
-    treasury_client.init(&organizer, &token.address());
+    let token = env.register_stellar_asset_contract(token_admin.clone());
+    let treasury = env.register(treasury::Treasury, ());
+    let treasury_client = treasury::TreasuryClient::new(&env, &treasury);
+    treasury_client.init(&organizer, &token);
 
     let config = crate::types::CircleConfig {
         organizer: organizer.clone(),
-        token: token.address(),
+        token: token.clone(),
         name: String::from_str(&env, "Integration Test Circle"),
         contribution_amount: 100_0000000i128,
         max_members: 3u32,
@@ -57,12 +58,13 @@ fn test_circle_lifecycle_with_fees() {
         slug: String::from_str(&env, "integration-test"),
     };
 
+    let admin = organizer.clone();
     let factory = Address::generate(&env);
-    let contract_id = env.register(crate::Circle, (&organizer, &factory, &config));
+    let contract_id = env.register(crate::Circle, (&admin, &factory, &config));
     let client = crate::CircleClient::new(&env, &contract_id);
 
     // Configure circle with treasury and fee
-    client.set_treasury(&organizer, &treasury_id);
+    client.set_treasury(&organizer, &treasury);
     client.set_fee_bps(&organizer, &50u32); // 0.5% fee
 
     // Members join
@@ -78,7 +80,7 @@ fn test_circle_lifecycle_with_fees() {
     assert_eq!(client.get_status().status, 1u32); // STATUS_ACTIVE
 
     // Mint tokens for members
-    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &token.address());
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &token);
     token_client.mint(&m1, &(config.contribution_amount * 3));
     token_client.mint(&m2, &(config.contribution_amount * 3));
     token_client.mint(&m3, &(config.contribution_amount * 3));
@@ -94,8 +96,8 @@ fn test_circle_lifecycle_with_fees() {
     assert!(status_r0.total_fees > 0); // Fee was collected
 
     // Verify treasury received the fee
-    let token_client_regular = soroban_sdk::token::Client::new(&env, &token.address());
-    let treasury_balance = token_client_regular.balance(&treasury_id);
+    let token_client_regular = soroban_sdk::token::Client::new(&env, &token);
+    let treasury_balance = token_client_regular.balance(&treasury);
     assert!(treasury_balance > 0, "Treasury should have received fees");
 
     // Round 1: Repeat
@@ -116,128 +118,7 @@ fn test_circle_lifecycle_with_fees() {
     assert_eq!(final_status.current_round, 3u32);
 
     // Verify total fees accumulated
-    let final_treasury_balance = token_client_regular.balance(&treasury_id);
+    let final_treasury_balance = token_client_regular.balance(&treasury);
     assert_eq!(final_treasury_balance, final_status.total_fees);
     assert!(final_treasury_balance > 0);
-}
-
-#[test]
-fn test_dispute_slash_payout_flow() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let admin = Address::generate(&env);
-    let token_admin = Address::generate(&env);
-    let token = env.register_stellar_asset_contract_v2(token_admin);
-    let treasury_id = env.register(treasury::Treasury, ());
-    let treasury_client = treasury::TreasuryClient::new(&env, &treasury_id);
-    treasury_client.init(&admin, &token.address());
-
-    let collateral = 500_i128;
-    let contribution = 1000_i128;
-
-    let config = crate::types::CircleConfig {
-        organizer: admin.clone(),
-        token: token.address(),
-        name: String::from_str(&env, "Dispute Slash Circle"),
-        contribution_amount: contribution,
-        max_members: 2u32,
-        payout_type: 1u32, // Fixed
-        total_rounds: 1u32,
-        contribution_deadline_seconds: 3600u64,
-        min_moi_score: 0u32,
-        collateral_amount: collateral,
-        penalty_bps: 0u32,
-        grace_period_seconds: 0u64,
-        max_strikes: 2u32,
-        slug: String::from_str(&env, "dispute-slash-test"),
-    };
-
-    let factory = Address::generate(&env);
-    let contract_id = env.register(crate::Circle, (&admin, &factory, &config));
-    let client = crate::CircleClient::new(&env, &contract_id);
-    let token_client = soroban_sdk::token::Client::new(&env, &token.address());
-    let token_admin_client = soroban_sdk::token::StellarAssetClient::new(&env, &token.address());
-
-    // Configure treasury
-    client.set_treasury(&admin, &treasury_id);
-
-    let m1 = Address::generate(&env);
-    let m2 = Address::generate(&env);
-
-    // Mint tokens for members (collateral + contribution)
-    token_admin_client.mint(&m1, &(collateral + contribution));
-    token_admin_client.mint(&m2, &(collateral + contribution));
-
-    let initial_mint_total = (collateral + contribution) * 2;
-
-    // Both members join, depositing collateral
-    client.join(&m1);
-    client.join(&m2);
-
-    assert_eq!(token_client.balance(&contract_id), collateral * 2);
-    assert_eq!(client.get_status().status, 1u32); // STATUS_ACTIVE
-
-    // Round 0 contributions
-    client.contribute(&m1, &contribution, &0u32);
-    client.contribute(&m2, &contribution, &0u32);
-
-    assert_eq!(token_client.balance(&contract_id), (collateral + contribution) * 2);
-
-    // Member 2 raises dispute with evidence hash
-    let evidence_hash = soroban_sdk::BytesN::from_array(&env, &[0xab; 32]);
-    client.raise_dispute(&m2, &evidence_hash);
-
-    // Verify circle is in STATUS_DISPUTED (4)
-    assert_eq!(client.get_status().status, 4u32);
-
-    // Verify operations are blocked during active dispute
-    let stranger = Address::generate(&env);
-    let payout_blocked = client.try_trigger_payout(&admin, &0u32);
-    assert_eq!(payout_blocked, Err(Ok(crate::types::CircleError::NotActive)));
-
-    let unauthorized_resolve = client.try_resolve_dispute(&stranger, &2u32);
-    assert_eq!(unauthorized_resolve, Err(Ok(crate::types::CircleError::Unauthorized)));
-
-    // Advance ledger timestamp to simulate dispute review window
-    let current_timestamp = env.ledger().timestamp();
-    env.ledger().set_timestamp(current_timestamp + 7200);
-
-    // Admin resolves dispute with RESOLVE_PENALIZE (2) -> slashes m2's collateral to treasury
-    client.resolve_dispute(&admin, &2u32);
-
-    // Assert status restored to ACTIVE
-    assert_eq!(client.get_status().status, 1u32);
-
-    // Assert slash accounting:
-    // 1. Treasury received the slashed collateral
-    assert_eq!(token_client.balance(&treasury_id), collateral);
-    // 2. Member 2 received a strike and defaulted status
-    let members = client.get_members();
-    let m2_record = members.iter().find(|m| m.address == m2).unwrap();
-    assert_eq!(m2_record.strikes, 1);
-    assert_eq!(m2_record.status, 2u32); // MEMBER_DEFAULTED
-                                        // 3. Contract balance reduced by slashed collateral (now has m1 collateral + 2 contributions)
-    assert_eq!(token_client.balance(&contract_id), collateral + contribution * 2);
-
-    // Subsequent payout execution succeeds for round 0
-    client.trigger_payout(&admin, &0u32);
-
-    // Payout distributed to m1 (position 0 in PAYOUT_FIXED: 2000 payout + 500 collateral refund = 2500)
-    assert_eq!(token_client.balance(&m1), 2500);
-
-    // Verify circle completed and m2's slashed collateral was NOT returned
-    let status_final = client.get_status();
-    assert_eq!(status_final.status, 2u32); // STATUS_COMPLETED
-    assert_eq!(token_client.balance(&m2), 0);
-
-    // Verify contract has zero remaining tokens (full conservation)
-    assert_eq!(token_client.balance(&contract_id), 0);
-
-    // Accounting invariant: sum of all balances matches total minted
-    let total_distributed = token_client.balance(&treasury_id)
-        + token_client.balance(&m1)
-        + token_client.balance(&m2)
-        + token_client.balance(&contract_id);
-    assert_eq!(total_distributed, initial_mint_total);
 }

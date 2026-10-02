@@ -578,3 +578,12 @@ pub struct Streak {
     pub longest_streak: u32,
     pub last_round: u32,
 }
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AuctionCancelled {
+    pub round: u32,
+    pub cancelled_by: Address,
+    pub refunded_bidder: Option<Address>,
+    pub refunded_amount: i128,
+}

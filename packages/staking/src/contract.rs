@@ -683,6 +683,245 @@ pub fn slash(
     Ok(slash_amount)
 }
 
+/// Top up an active stake position without resetting the unlock time
+///
+/// Merges additional tokens into the existing active stake while strictly preserving
+/// the original unlock time (`unlock_time`). Updates voting power with the existing multiplier
+/// and adjusts the effective start time using weighted-average accounting for rewards:
+/// `effective_start = now - (initial_amount * (now - start_time)) / new_total`.
+pub fn top_up(
+    env: &Env,
+    user: &Address,
+    amount: i128,
+) -> Result<(), StakingError> {
+    pause::when_not_paused(env).map_err(|_| StakingError::ContractPaused)?;
+
+    user.require_auth();
+
+    if amount <= 0 {
+        return Err(StakingError::InvalidAmount);
+    }
+
+    let stake_position: StakePosition = env
+        .storage()
+        .instance()
+        .get(&DataKey::Stake(user.clone()))
+        .ok_or(StakingError::NoActiveStake)?;
+
+    let current_time = env.ledger().timestamp();
+    // Staker is eligible to top-up up to and including the unlock time boundary
+    if current_time > stake_position.unlock_time {
+        return Err(StakingError::StakeNotUnlocked);
+    }
+
+    let token_address: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Token)
+        .ok_or(StakingError::NotInitialized)?;
+
+    let token_client = token::Client::new(env, &token_address);
+    token_client.transfer(user, &env.current_contract_address(), &amount);
+
+    let new_amount = stake_position
+        .amount
+        .checked_add(amount)
+        .ok_or(StakingError::Overflow)?;
+
+    let multiplier = stake_position.period.multiplier();
+    let new_voting_power = new_amount
+        .checked_mul(multiplier as i128)
+        .ok_or(StakingError::Overflow)?;
+
+    // Weighted-average accounting for rewards:
+    // Preserves accumulated time-weight: initial_amount * (now - start_time)
+    // = new_amount * (now - effective_start_time)
+    let elapsed = current_time.saturating_sub(stake_position.start_time);
+    let weighted_duration = if new_amount > 0 {
+        ((stake_position.amount as u128).saturating_mul(elapsed as u128) / (new_amount as u128)) as u64
+    } else {
+        0
+    };
+    let effective_start_time = current_time.saturating_sub(weighted_duration);
+
+    // CRITICAL: unlock_time remains UNCHANGED
+    let unlock_time = stake_position.unlock_time;
+
+    let updated_position = StakePosition {
+        amount: new_amount,
+        period: stake_position.period,
+        start_time: effective_start_time,
+        unlock_time,
+        voting_power: new_voting_power,
+    };
+
+    env.storage()
+        .instance()
+        .set(&DataKey::Stake(user.clone()), &updated_position);
+
+    let total_staked: i128 = env
+        .storage()
+        .instance()
+        .get(&DataKey::TotalStaked)
+        .unwrap_or(0);
+    let new_total = total_staked
+        .checked_add(amount)
+        .ok_or(StakingError::Overflow)?;
+    env.storage().instance().set(&DataKey::TotalStaked, &new_total);
+
+    StakeToppedUp {
+        user: user.clone(),
+        added_amount: amount,
+        new_total_amount: new_amount,
+        unlock_time,
+        new_voting_power,
+    }
+    .publish(env);
+
+    Ok(())
+}
+
+/// Computes the time-weighted reward-eligible principal for a user over their active stake period.
+pub fn get_time_weighted_amount(env: &Env, user: &Address) -> i128 {
+    let stake_position: Option<StakePosition> = env
+        .storage()
+        .instance()
+        .get(&DataKey::Stake(user.clone()));
+
+    match stake_position {
+        Some(pos) => {
+            let current_time = env.ledger().timestamp();
+            let total_span = pos.unlock_time.saturating_sub(pos.start_time);
+            if total_span == 0 || current_time <= pos.start_time {
+                pos.amount
+            } else {
+                let elapsed = current_time.saturating_sub(pos.start_time).min(total_span);
+                ((pos.amount as u128).saturating_mul(elapsed as u128) / (total_span as u128)) as i128
+            }
+        }
+        None => 0,
+    }
+}
+
+/// Top up an active stake position without resetting the unlock time
+///
+/// Merges additional tokens into the existing active stake while strictly preserving
+/// the original unlock time (`unlock_time`). Updates voting power with the existing multiplier
+/// and adjusts the effective start time using weighted-average accounting for rewards:
+/// `effective_start = now - (initial_amount * (now - start_time)) / new_total`.
+pub fn top_up(
+    env: &Env,
+    user: &Address,
+    amount: i128,
+) -> Result<(), StakingError> {
+    pause::when_not_paused(env).map_err(|_| StakingError::ContractPaused)?;
+
+    user.require_auth();
+
+    if amount <= 0 {
+        return Err(StakingError::InvalidAmount);
+    }
+
+    let stake_position: StakePosition = env
+        .storage()
+        .instance()
+        .get(&DataKey::Stake(user.clone()))
+        .ok_or(StakingError::NoActiveStake)?;
+
+    let current_time = env.ledger().timestamp();
+    // Staker is eligible to top-up up to and including the unlock time boundary
+    if current_time > stake_position.unlock_time {
+        return Err(StakingError::StakeNotUnlocked);
+    }
+
+    let token_address: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Token)
+        .ok_or(StakingError::NotInitialized)?;
+
+    let token_client = token::Client::new(env, &token_address);
+    token_client.transfer(user, &env.current_contract_address(), &amount);
+
+    let new_amount = stake_position
+        .amount
+        .checked_add(amount)
+        .ok_or(StakingError::Overflow)?;
+
+    let multiplier = stake_position.period.multiplier();
+    let new_voting_power = new_amount
+        .checked_mul(multiplier as i128)
+        .ok_or(StakingError::Overflow)?;
+
+    // Weighted-average accounting for rewards:
+    // Preserves accumulated time-weight: initial_amount * (now - start_time)
+    // = new_amount * (now - effective_start_time)
+    let elapsed = current_time.saturating_sub(stake_position.start_time);
+    let weighted_duration = if new_amount > 0 {
+        ((stake_position.amount as u128).saturating_mul(elapsed as u128) / (new_amount as u128)) as u64
+    } else {
+        0
+    };
+    let effective_start_time = current_time.saturating_sub(weighted_duration);
+
+    // CRITICAL: unlock_time remains UNCHANGED
+    let unlock_time = stake_position.unlock_time;
+
+    let updated_position = StakePosition {
+        amount: new_amount,
+        period: stake_position.period,
+        start_time: effective_start_time,
+        unlock_time,
+        voting_power: new_voting_power,
+    };
+
+    env.storage()
+        .instance()
+        .set(&DataKey::Stake(user.clone()), &updated_position);
+
+    let total_staked: i128 = env
+        .storage()
+        .instance()
+        .get(&DataKey::TotalStaked)
+        .unwrap_or(0);
+    let new_total = total_staked
+        .checked_add(amount)
+        .ok_or(StakingError::Overflow)?;
+    env.storage().instance().set(&DataKey::TotalStaked, &new_total);
+
+    StakeToppedUp {
+        user: user.clone(),
+        added_amount: amount,
+        new_total_amount: new_amount,
+        unlock_time,
+        new_voting_power,
+    }
+    .publish(env);
+
+    Ok(())
+}
+
+/// Computes the time-weighted reward-eligible principal for a user over their active stake period.
+pub fn get_time_weighted_amount(env: &Env, user: &Address) -> i128 {
+    let stake_position: Option<StakePosition> = env
+        .storage()
+        .instance()
+        .get(&DataKey::Stake(user.clone()));
+
+    match stake_position {
+        Some(pos) => {
+            let current_time = env.ledger().timestamp();
+            let total_span = pos.unlock_time.saturating_sub(pos.start_time);
+            if total_span == 0 || current_time <= pos.start_time {
+                pos.amount
+            } else {
+                let elapsed = current_time.saturating_sub(pos.start_time).min(total_span);
+                ((pos.amount as u128).saturating_mul(elapsed as u128) / (total_span as u128)) as i128
+            }
+        }
+        None => 0,
+    }
+}
 /// Get the configured slash notice period in seconds.
 pub fn get_slash_notice_period(env: &Env) -> u64 {
     env.storage()
