@@ -62,13 +62,17 @@ pub enum DataKey {
     Paused,
     /// Map<Address, StakePosition> - user's active stake
     Stake(Address),
-    /// Map<Address, UnbondingPosition> - user's unstaking position
+    /// Map<Address, UnbondingPosition> - user's unbonding position
     Unbonding(Address),
     /// Total staked amount across all users
     TotalStaked,
     /// Ordered list of addresses with an active stake position.
     /// Updated on stake() and unstake(). Used by get_all_stakers().
     StakerList,
+    /// Active slash notice: (amount, notice_until, executor)
+    SlashNotice(Address),
+    /// Global slash notice period in seconds (default: 86400 = 24 hours)
+    SlashNoticePeriod,
 }
 
 /// User's active staking position
@@ -125,6 +129,10 @@ pub enum StakingError {
     /// callers (and the Go-side error classifier) receive a machine-readable
     /// code rather than an opaque host panic.
     InsufficientContractBalance = 113,
+    SlashNoticePeriodActive = 114,
+    NoActiveSlashNotice = 115,
+    SlashNotAuthorized = 116,
+    SlashNoticeExpired = 117,
 }
 
 /// Event emitted when tokens are staked
@@ -167,6 +175,35 @@ pub struct VotingPowerQueried {
     pub voting_power: i128,
 }
 
+/// Event emitted when a slash notice is created
+#[contractevent(topics = ["slash_notice"])]
+#[derive(Clone, Debug)]
+pub struct SlashNoticeCreated {
+    #[topic]
+    pub executor: Address,
+    pub user: Address,
+    pub amount: i128,
+    pub notice_until: u64,
+}
+
+/// Event emitted when a slash is cancelled during the notice period
+#[contractevent(topics = ["slash_cancelled"])]
+#[derive(Clone, Debug)]
+pub struct SlashCancelled {
+    #[topic]
+    pub executor: Address,
+    pub user: Address,
+    pub amount: i128,
+}
+
+/// Event emitted when a slash is executed after the notice period
+#[contractevent(topics = ["slash_executed"])]
+#[derive(Clone, Debug)]
+pub struct SlashExecuted {
+    #[topic]
+    pub executor: Address,
+    pub user: Address,
+    pub amount: i128,
 /// Event emitted when stake is slashed (#523)
 #[contractevent(topics = ["slashed"])]
 #[derive(Clone, Debug)]

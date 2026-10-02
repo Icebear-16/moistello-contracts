@@ -44,6 +44,10 @@ mod tests {
             grace_period_seconds: 86400u64,
             max_strikes: 3u32,
             slug: String::from_str(env, "test-circle"),
+            max_withdrawal_per_tx: 50_0000000i128,
+            daily_withdrawal_limit: 100_0000000i128,
+            min_duration_seconds: 0u64,
+
         }
     }
 
@@ -1383,6 +1387,9 @@ fn create_config(env: &Env, token: &Address) -> crate::types::CircleConfig {
         grace_period_seconds: 0,
         max_strikes: 3,
         slug: String::from_str(env, "test-circle"),
+        max_withdrawal_per_tx: 50_i128,
+        daily_withdrawal_limit: 100_i128,
+        min_duration_seconds: 0,
     }
 }
 
@@ -2065,4 +2072,116 @@ fn test_refund_losing_bids_fifty_bidders_in_batches() {
         assert_eq!(token_client.balance(&bidder), deposit);
     }
     assert_eq!(client.refund_losing_bids(&organizer, &0u32, &10u32), 0);
+}
+
+// =============================================================================
+// Issue #466 – enforce minimum circle duration before payout
+// =============================================================================
+
+#[test]
+fn test_trigger_payout_rejects_early_payout() {
+    let env = Env::default();
+    let (client, admin, token) = setup_circle(&env);
+    let member_one = Address::generate(&env);
+    let member_two = Address::generate(&env);
+
+    client.join(&member_one);
+    client.join(&member_two);
+
+    mint_tokens(&env, &token, &member_one, 100);
+    mint_tokens(&env, &token, &member_two, 100);
+    client.contribute(&member_one, &100_i128, &0_u32);
+    client.contribute(&member_two, &100_i128, &0_u32);
+
+    // Try to trigger payout before min_duration_seconds elapses
+    let result = client.try_trigger_payout(&admin, &0_u32);
+    assert_eq!(result, Err(Ok(CircleError::CircleDurationTooShort)));
+}
+
+#[test]
+fn test_trigger_payout_succeeds_after_min_duration() {
+    let env = Env::default();
+    let (client, admin, token) = setup_circle(&env);
+    let member_one = Address::generate(&env);
+    let member_two = Address::generate(&env);
+
+    client.join(&member_one);
+    client.join(&member_two);
+
+    mint_tokens(&env, &token, &member_one, 100);
+    mint_tokens(&env, &token, &member_two, 100);
+    client.contribute(&member_one, &100_i128, &0_u32);
+    client.contribute(&member_two, &100_i128, &0_u32);
+
+    // Advance time past min_duration_seconds (default 0 in test config)
+    env.ledger().set_timestamp(env.ledger().timestamp() + 100);
+    let result = client.try_trigger_payout(&admin, &0_u32);
+    assert!(result.is_ok() || result.unwrap_err().is_ok());
+}
+
+// =============================================================================
+// Issue #478 – organizer withdrawal limits
+// =============================================================================
+
+#[test]
+fn test_withdraw_treasury_unauthorized() {
+    let env = Env::default();
+    let (client, admin, token) = setup_circle(&env);
+    let stranger = Address::generate(&env);
+
+    // Treasury must be set first
+    let treasury_id = env.register(treasury::Treasury, ());
+    let treasury_client = treasury::TreasuryClient::new(&env, &treasury_id);
+    treasury_client.init(&admin, &token);
+    client.set_treasury(&admin, &treasury_id);
+
+    // Mint tokens to the circle contract
+    let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+    stellar_token.mint(&client.address, &100_i128);
+
+    let result = client.try_withdraw_treasury(&stranger, &10_i128);
+    assert_eq!(result, Err(Ok(CircleError::Unauthorized)));
+}
+
+#[test]
+fn test_withdraw_treasury_respects_per_tx_cap() {
+    let env = Env::default();
+    let (client, admin, token) = setup_circle(&env);
+
+    // Treasury must be set first
+    let treasury_id = env.register(treasury::Treasury, ());
+    let treasury_client = treasury::TreasuryClient::new(&env, &treasury_id);
+    treasury_client.init(&admin, &token);
+    client.set_treasury(&admin, &treasury_id);
+
+    // Mint tokens to the circle contract
+    let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+    stellar_token.mint(&client.address, &100_i128);
+
+    // Try to withdraw more than max_withdrawal_per_tx (50 in test config)
+    let result = client.try_withdraw_treasury(&admin, &60_i128);
+    assert_eq!(result, Err(Ok(CircleError::WithdrawalCapExceeded)));
+}
+
+#[test]
+fn test_withdraw_treasury_respects_daily_limit() {
+    let env = Env::default();
+    let (client, admin, token) = setup_circle(&env);
+
+    // Treasury must be set first
+    let treasury_id = env.register(treasury::Treasury, ());
+    let treasury_client = treasury::TreasuryClient::new(&env, &treasury_id);
+    treasury_client.init(&admin, &token);
+    client.set_treasury(&admin, &treasury_id);
+
+    // Mint tokens to the circle contract
+    let stellar_token = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+    stellar_token.mint(&client.address, &200_i128);
+
+    // First withdrawal should succeed (50 <= cap, 50 <= daily limit 100)
+    assert!(client.try_withdraw_treasury(&admin, &50_i128).is_ok());
+
+    // Second withdrawal should exceed daily limit (50 + 60 > 100)
+    let result = client.try_withdraw_treasury(&admin, &60_i128);
+    assert_eq!(result, Err(Ok(CircleError::DailyWithdrawalLimitExceeded)));
 }

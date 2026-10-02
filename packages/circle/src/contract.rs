@@ -88,6 +88,9 @@ pub fn init(
         total_payouts: 0,
         total_fees: 0,
         slug: config.slug.clone(),
+        max_withdrawal_per_tx: config.max_withdrawal_per_tx,
+        daily_withdrawal_limit: config.daily_withdrawal_limit,
+        min_duration_seconds: config.min_duration_seconds,
         health_score: 100,
     };
     env.storage().instance().set(&DataKey::Circle, &circle);
@@ -766,6 +769,13 @@ fn trigger_payout_internal(env: &Env, round: u32) -> Result<(), CircleError> {
     if round != circle.current_round {
         return Err(CircleError::RoundNotCurrent);
     }
+    if circle.min_duration_seconds > 0 {
+        let now = env.ledger().timestamp();
+        let elapsed = now.saturating_sub(circle.started_at);
+        if elapsed < circle.min_duration_seconds {
+            return Err(CircleError::CircleDurationTooShort);
+        }
+    }
     let (recipient, payout_type) = match circle.payout_type {
         PAYOUT_RANDOM => (payout::resolve_random(env, &circle, round)?, PAYOUT_RANDOM),
         PAYOUT_FIXED => (payout::resolve_fixed(env, &circle, round)?, PAYOUT_FIXED),
@@ -1098,6 +1108,101 @@ fn trigger_payout_internal(env: &Env, round: u32) -> Result<(), CircleError> {
             }
         }
     }
+    Ok(())
+}
+/// Allows the organizer or admin to withdraw accumulated treasury funds.
+///
+/// Enforces a per-transaction cap and a rolling daily limit to prevent
+/// draining the treasury under a compromised organizer key.  Amounts above
+/// the single-transaction cap require a member vote via the existing
+/// `vote_payout` flow.
+///
+/// # Parameters
+/// - `env`: Contract execution environment
+/// - `caller`: Address requesting the withdrawal (must be organizer or admin)
+/// - `amount`: Amount to withdraw from the treasury
+///
+/// # Returns
+/// - `Ok(())` on successful withdrawal
+/// - `Err(CircleError::Unauthorized)` if caller is neither organizer nor admin
+/// - `Err(CircleError::InvalidAmount)` if amount is not positive
+/// - `Err(CircleError::WithdrawalCapExceeded)` if amount exceeds max_withdrawal_per_tx
+/// - `Err(CircleError::DailyWithdrawalLimitExceeded)` if daily limit is exceeded
+///
+/// # Authorization
+/// Requires authentication from the `caller` address.
+///
+/// # Notes
+/// - Daily window resets at midnight UTC (based on ledger timestamp).
+/// - The treasury balance is checked before transfer to avoid host errors.
+pub fn withdraw_treasury(
+    env: &Env,
+    caller: &Address,
+    amount: i128,
+) -> Result<(), CircleError> {
+    pause::when_not_paused(env).map_err(|_| CircleError::ContractPaused)?;
+    let _guard = ReentrancyGuard::new(env).map_err(|_| CircleError::NotActive)?;
+    let circle: Circle = env
+        .storage()
+        .instance()
+        .get(&DataKey::Circle)
+        .ok_or(CircleError::NotInitialized)?;
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(CircleError::NotInitialized)?;
+    if caller != &circle.organizer && caller != &stored_admin {
+        return Err(CircleError::Unauthorized);
+    }
+    caller.require_auth();
+    if amount <= 0 {
+        return Err(CircleError::InvalidAmount);
+    }
+    if circle.max_withdrawal_per_tx > 0 && amount > circle.max_withdrawal_per_tx {
+        return Err(CircleError::WithdrawalCapExceeded);
+    }
+    let now = env.ledger().timestamp();
+    let day_key = (now / 86400) as u64;
+    let mut withdrawal_day: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::WithdrawalDay)
+        .unwrap_or(0);
+    let mut daily_amount: i128 = env
+        .storage()
+        .instance()
+        .get(&DataKey::WithdrawalAmount)
+        .unwrap_or(0);
+    if withdrawal_day != day_key {
+        withdrawal_day = day_key;
+        daily_amount = 0;
+    }
+    if circle.daily_withdrawal_limit > 0
+        && daily_amount.saturating_add(amount) > circle.daily_withdrawal_limit
+    {
+        return Err(CircleError::DailyWithdrawalLimitExceeded);
+    }
+    let treasury: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Treasury)
+        .ok_or(CircleError::NotInitialized)?;
+    let token_client = soroban_sdk::token::Client::new(env, &circle.token);
+    let treasury_balance = token_client.balance(&circle.id);
+    if treasury_balance < amount {
+        return Err(CircleError::InsufficientContractBalance);
+    }
+    token_client.transfer(&circle.id, caller, &amount);
+    daily_amount = math::safe_add(daily_amount, amount).map_err(|_| CircleError::InvalidAmount)?;
+    env.storage().instance().set(&DataKey::WithdrawalDay, &withdrawal_day);
+    env.storage()
+        .instance()
+        .set(&DataKey::WithdrawalAmount, &daily_amount);
+    env.events().publish(
+        (env.current_contract_address(), symbol_short!("withdraw")),
+        soroban_sdk::Val::from(amount),
+    );
     Ok(())
 }
 /// Submits a bid for auction-based payout rounds.

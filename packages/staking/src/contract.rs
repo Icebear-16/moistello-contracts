@@ -2,6 +2,7 @@ use soroban_sdk::{symbol_short, token, Address, Env, Vec};
 
 use crate::types::*;
 use common::pause;
+use common::math;
 
 /// Initialize the staking contract
 pub fn init(env: &Env, admin: &Address, token: &Address) {
@@ -680,4 +681,219 @@ pub fn slash(
     .publish(env);
 
     Ok(slash_amount)
+}
+
+/// Get the configured slash notice period in seconds.
+pub fn get_slash_notice_period(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::SlashNoticePeriod)
+        .unwrap_or(86400) // default 24 hours
+}
+
+/// Set the slash notice period in seconds (admin only).
+pub fn set_slash_notice_period(env: &Env, admin: &Address, period_seconds: u64) -> Result<(), StakingError> {
+    let stored_admin: Address = env.storage().instance()
+        .get(&DataKey::Admin)
+        .ok_or(StakingError::NotInitialized)?;
+    
+    if admin != &stored_admin {
+        return Err(StakingError::Unauthorized);
+    }
+    
+    admin.require_auth();
+    env.storage().instance().set(&DataKey::SlashNoticePeriod, &period_seconds);
+    Ok(())
+}
+
+/// Get the active slash notice for a user, if any.
+pub fn get_slash_notice(env: &Env, user: &Address) -> Option<(i128, u64, Address)> {
+    env.storage()
+        .instance()
+        .get(&DataKey::SlashNotice(user.clone()))
+}
+
+/// Propose a slash against a staker. Creates a notice that must elapse
+/// before the slash can be executed. Only the contract admin may propose.
+///
+/// # Arguments
+/// * `env` - Execution environment
+/// * `admin` - Contract admin proposing the slash
+/// * `user` - Address of the staker to slash
+/// * `amount` - Amount to slash (must be positive and <= user's stake)
+///
+/// # Returns
+/// * `Ok(())` if the notice was created
+/// * `Err(StakingError::Unauthorized)` if caller is not admin
+/// * `Err(StakingError::InvalidAmount)` if amount is not positive
+/// * `Err(StakingError::NoActiveStake)` if user has no active stake
+/// * `Err(StakingError::SlashNoticePeriodActive)` if a notice already exists
+pub fn slash(
+    env: &Env,
+    admin: &Address,
+    user: &Address,
+    amount: i128,
+) -> Result<(), StakingError> {
+    let stored_admin: Address = env.storage().instance()
+        .get(&DataKey::Admin)
+        .ok_or(StakingError::NotInitialized)?;
+    
+    if admin != &stored_admin {
+        return Err(StakingError::Unauthorized);
+    }
+    
+    admin.require_auth();
+    
+    if amount <= 0 {
+        return Err(StakingError::InvalidAmount);
+    }
+    
+    let stake_position: StakePosition = env.storage().instance()
+        .get(&DataKey::Stake(user.clone()))
+        .ok_or(StakingError::NoActiveStake)?;
+    
+    if amount > stake_position.amount {
+        return Err(StakingError::InvalidAmount);
+    }
+    
+    // Check if there's already an active notice
+    if env.storage().instance().has(&DataKey::SlashNotice(user.clone())) {
+        return Err(StakingError::SlashNoticePeriodActive);
+    }
+    
+    let notice_period = get_slash_notice_period(env);
+    let now = env.ledger().timestamp();
+    let notice_until = now
+        .checked_add(notice_period)
+        .ok_or(StakingError::Overflow)?;
+    
+    env.storage().instance().set(&DataKey::SlashNotice(user.clone()), &(amount, notice_until, admin.clone()));
+    
+    SlashNoticeCreated {
+        executor: admin.clone(),
+        user: user.clone(),
+        amount,
+        notice_until,
+    }.publish(env);
+    
+    Ok(())
+}
+
+/// Cancel an active slash notice during the notice period (admin only).
+///
+/// # Arguments
+/// * `env` - Execution environment
+/// * `admin` - Contract admin cancelling the slash
+/// * `user` - Address of the staker whose slash notice is being cancelled
+///
+/// # Returns
+/// * `Ok(())` if the notice was cancelled
+/// * `Err(StakingError::Unauthorized)` if caller is not admin
+/// * `Err(StakingError::NoActiveSlashNotice)` if no notice exists
+/// * `Err(StakingError::SlashNoticeExpired)` if the notice period has elapsed
+pub fn cancel_slash(
+    env: &Env,
+    admin: &Address,
+    user: &Address,
+) -> Result<(), StakingError> {
+    let stored_admin: Address = env.storage().instance()
+        .get(&DataKey::Admin)
+        .ok_or(StakingError::NotInitialized)?;
+    
+    if admin != &stored_admin {
+        return Err(StakingError::Unauthorized);
+    }
+    
+    admin.require_auth();
+    
+    let notice: (i128, u64, Address) = env.storage().instance()
+        .get(&DataKey::SlashNotice(user.clone()))
+        .ok_or(StakingError::NoActiveSlashNotice)?;
+    
+    let now = env.ledger().timestamp();
+    if now >= notice.1 {
+        return Err(StakingError::SlashNoticeExpired);
+    }
+    
+    env.storage().instance().remove(&DataKey::SlashNotice(user.clone()));
+    
+    SlashCancelled {
+        executor: admin.clone(),
+        user: user.clone(),
+        amount: notice.0,
+    }.publish(env);
+    
+    Ok(())
+}
+
+/// Execute an active slash after the notice period has elapsed (admin only).
+///
+/// # Arguments
+/// * `env` - Execution environment
+/// * `admin` - Contract admin executing the slash
+/// * `user` - Address of the staker to slash
+///
+/// # Returns
+/// * `Ok(())` if the slash was executed
+/// * `Err(StakingError::Unauthorized)` if caller is not admin
+/// * `Err(StakingError::NoActiveSlashNotice)` if no notice exists
+/// * `Err(StakingError::SlashNoticeExpired)* if the notice period has not elapsed
+pub fn execute_slash(
+    env: &Env,
+    admin: &Address,
+    user: &Address,
+) -> Result<(), StakingError> {
+    let stored_admin: Address = env.storage().instance()
+        .get(&DataKey::Admin)
+        .ok_or(StakingError::NotInitialized)?;
+    
+    if admin != &stored_admin {
+        return Err(StakingError::Unauthorized);
+    }
+    
+    admin.require_auth();
+    
+    let notice: (i128, u64, Address) = env.storage().instance()
+        .get(&DataKey::SlashNotice(user.clone()))
+        .ok_or(StakingError::NoActiveSlashNotice)?;
+    
+    let now = env.ledger().timestamp();
+    if now < notice.1 {
+        return Err(StakingError::SlashNoticePeriodActive);
+    }
+    
+    let slash_amount = notice.0;
+    
+    // Get the stake position
+    let mut stake_position: StakePosition = env.storage().instance()
+        .get(&DataKey::Stake(user.clone()))
+        .ok_or(StakingError::NoActiveStake)?;
+    
+    // Calculate the new amount after slash
+    let new_amount = math::safe_sub(stake_position.amount, slash_amount)
+        .map_err(|_| StakingError::InvalidAmount)?;
+    
+    // Update the stake position
+    stake_position.amount = new_amount;
+    stake_position.voting_power = new_amount * stake_position.period.multiplier() as i128;
+    env.storage().instance().set(&DataKey::Stake(user.clone()), &stake_position);
+    
+    // Update total staked
+    let total_staked: i128 = env.storage().instance()
+        .get(&DataKey::TotalStaked)
+        .unwrap_or(0);
+    let new_total = math::safe_sub(total_staked, slash_amount)
+        .map_err(|_| StakingError::InvalidAmount)?;
+    env.storage().instance().set(&DataKey::TotalStaked, &new_total);
+    
+    // Remove the notice
+    env.storage().instance().remove(&DataKey::SlashNotice(user.clone()));
+    
+    SlashExecuted {
+        executor: admin.clone(),
+        user: user.clone(),
+        amount: slash_amount,
+    }.publish(env);
+    
+    Ok(())
 }

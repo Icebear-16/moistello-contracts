@@ -174,6 +174,29 @@ impl Circle {
         contract::is_payout_scheduled(&env, round)
     }
 
+    pub fn pause_circle(env:Env,admin:Address)->Result<(),types::CircleError>{contract::pause_circle(&env,&admin)}
+    pub fn unpause_circle(env:Env,admin:Address)->Result<(),types::CircleError>{contract::unpause_circle(&env,&admin)}
+    pub fn batch_invite(env:Env,caller:Address,members:soroban_sdk::Vec<Address>)->Result<(),types::CircleError>{contract::batch_invite(&env,&caller,&members)}
+    pub fn batch_payout(env:Env,caller:Address,recipients:soroban_sdk::Vec<Address>,amounts:soroban_sdk::Vec<i128>,round:u32)->Result<(),types::CircleError>{contract::batch_payout(&env,&caller,&recipients,&amounts,round)}
+    pub fn register_referral(env:Env,referrer:Address,referred:Address,bonus_pct:u32)->Result<(),types::CircleError>{contract::register_referral(&env,&referrer,&referred,bonus_pct)}
+    pub fn claim_referral_bonus(env:Env,referrer:Address)->Result<(),types::CircleError>{contract::claim_referral_bonus(&env,&referrer)}
+    pub fn update_streak(env:Env,member:Address,round:u32)->Result<(),types::CircleError>{contract::update_streak(&env,&member,round)}
+    pub fn claim_streak_bonus(env:Env,member:Address)->Result<(),types::CircleError>{contract::claim_streak_bonus(&env,&member)}
+    pub fn get_referrals(env:Env)->soroban_sdk::Vec<types::Referral>{contract::get_referrals(&env)}
+    pub fn get_streaks(env:Env)->soroban_sdk::Vec<types::Streak>{contract::get_streaks(&env)}
+    pub fn get_member_streak(env:Env,member:Address)->types::Streak{contract::get_member_streak(&env,&member)}
+    pub fn set_reputation_registry(env:Env,admin:Address,registry:Address)->Result<(),types::CircleError>{contract::set_reputation_registry(&env,&admin,&registry)}
+    pub fn get_reputation_registry(env:Env)->Option<Address>{contract::get_reputation_registry(&env)}
+    pub fn set_treasury(env:Env,admin:Address,treasury:Address)->Result<(),types::CircleError>{contract::set_treasury(&env,&admin,&treasury)}
+    pub fn set_token(env:Env,admin:Address,token:Address)->Result<(),types::CircleError>{contract::set_token(&env,&admin,&token)}
+    pub fn set_fee_bps(env:Env,admin:Address,fee_bps:u32)->Result<(),types::CircleError>{contract::set_fee_bps(&env,&admin,fee_bps)}
+    pub fn set_allowlist(env:Env,admin:Address,allowlist:soroban_sdk::Vec<Address>)->Result<(),types::CircleError>{contract::set_allowlist(&env,&admin,allowlist)}
+    pub fn get_allowlist(env:Env)->soroban_sdk::Vec<Address>{contract::get_allowlist(&env)}
+    pub fn set_oracle(env:Env,admin:Address,oracle:Address)->Result<(),types::CircleError>{contract::set_oracle(&env,&admin,&oracle)}
+    pub fn set_fallback_oracle(env:Env,admin:Address,oracle:Address)->Result<(),types::CircleError>{contract::set_fallback_oracle(&env,&admin,&oracle)}
+    pub fn get_oracle(env:Env)->Option<Address>{contract::get_oracle(&env)}
+    pub fn get_fallback_oracle(env:Env)->Option<Address>{contract::get_fallback_oracle(&env)}
+    pub fn withdraw_treasury(env:Env,caller:Address,amount:i128)->Result<(),types::CircleError>{contract::withdraw_treasury(&env,&caller,amount)}
     pub fn pause_circle(env: Env, admin: Address) -> Result<(), types::CircleError> {
         contract::pause_circle(&env, &admin)
     }

@@ -500,6 +500,98 @@ fn test_staking_period_from_u32() {
     assert_eq!(StakingPeriod::from_u32(24), None);
 }
 
+// =============================================================================
+// Issue #467 – slashing notice period before execution
+// =============================================================================
+
+#[test]
+fn test_slash_notice_created() {
+    let (env, admin, user, token) = setup_test_env();
+    let staking_client = deploy_staking_contract(&env, &admin, &token);
+    
+    // Stake first
+    staking_client.stake(&user, &100_0000000, &1);
+    
+    // Set a short notice period for testing
+    staking_client.set_slash_notice_period(&admin, &10u64);
+    
+    // Create slash notice
+    let result = staking_client.try_slash(&admin, &user, &50_0000000);
+    assert!(result.is_ok());
+    
+    // Verify notice exists
+    let notice = staking_client.get_slash_notice(&user);
+    assert!(notice.is_some());
+    let (amount, notice_until, executor) = notice.unwrap();
+    assert_eq!(amount, 50_0000000);
+    assert_eq!(executor, admin);
+}
+
+#[test]
+fn test_slash_cancelled_during_notice_period() {
+    let (env, admin, user, token) = setup_test_env();
+    let staking_client = deploy_staking_contract(&env, &admin, &token);
+    
+    // Stake first
+    staking_client.stake(&user, &100_0000000, &1);
+    
+    // Set a short notice period for testing
+    staking_client.set_slash_notice_period(&admin, &10u64);
+    
+    // Create slash notice
+    staking_client.slash(&admin, &user, &50_0000000);
+    
+    // Cancel slash during notice period
+    let result = staking_client.try_cancel_slash(&admin, &user);
+    assert!(result.is_ok());
+    
+    // Verify notice is removed
+    let notice = staking_client.get_slash_notice(&user);
+    assert!(notice.is_none());
+}
+
+#[test]
+fn test_slash_executed_after_notice_period() {
+    let (env, admin, user, token) = setup_test_env();
+    let staking_client = deploy_staking_contract(&env, &admin, &token);
+    
+    // Stake first
+    staking_client.stake(&user, &100_0000000, &1);
+    
+    // Set a short notice period for testing
+    staking_client.set_slash_notice_period(&admin, &10u64);
+    
+    // Create slash notice
+    staking_client.slash(&admin, &user, &50_0000000);
+    
+    // Advance past notice period
+    env.ledger().set_timestamp(env.ledger().timestamp() + 20);
+    
+    // Execute slash
+    let result = staking_client.try_execute_slash(&admin, &user);
+    assert!(result.is_ok());
+    
+    // Verify stake is reduced
+    let stake = staking_client.get_stake(&user);
+    assert_eq!(stake.as_ref().unwrap().amount, 50_0000000);
+    
+    // Verify notice is removed
+    let notice = staking_client.get_slash_notice(&user);
+    assert!(notice.is_none());
+}
+
+#[test]
+fn test_slash_unauthorized() {
+    let (env, admin, user, token) = setup_test_env();
+    let staking_client = deploy_staking_contract(&env, &admin, &token);
+    
+    // Stake first
+    staking_client.stake(&user, &100_0000000, &1);
+    
+    // Stranger tries to slash
+    let stranger = Address::generate(&env);
+    let result = staking_client.try_slash(&stranger, &user, &50_0000000);
+    assert_eq!(result, Err(Ok(StakingError::Unauthorized)));
 // ── Tests for get_stake_amount ────────────────────────────────────────────────
 
 /// Happy path: staking sets the correct amount readable via get_stake_amount.
