@@ -2,10 +2,10 @@
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::{Address, Env, String};
-    use soroban_sdk::testutils::Address as _;
     use crate as governance_token;
     use governance_token::{GovernanceToken, GovernanceTokenClient};
+    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{Address, Env, String};
 
     fn setup(env: &Env) -> (Address, GovernanceTokenClient) {
         let admin = Address::generate(env);
@@ -489,6 +489,8 @@ mod tests {
 
         assert!(client.try_set_allowlist_mode(&not_admin, &true).is_err());
         assert!(client.try_add_to_allowlist(&not_admin, &account).is_err());
-        assert!(client.try_remove_from_allowlist(&not_admin, &account).is_err());
+        assert!(client
+            .try_remove_from_allowlist(&not_admin, &account)
+            .is_err());
     }
 }

@@ -831,7 +831,7 @@
                           "symbol": "total_contributions"
                         },
                         "val": {
-                          "i128": "0"
+                          "i128": "1000000000"
                         }
                       },
                       {
@@ -899,7 +899,7 @@
                           "symbol": "total_contributions"
                         },
                         "val": {
-                          "i128": "0"
+                          "i128": "1000000000"
                         }
                       },
                       {

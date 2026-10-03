@@ -288,32 +288,8 @@
           },
           "sub_invocations": []
         }
-      ],
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL",
-              "function_name": "transfer",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                },
-                {
-                  "i128": "10"
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
       ]
     ],
-    [],
     [],
     [],
     [],
@@ -1029,7 +1005,7 @@
                           "symbol": "total_contributions"
                         },
                         "val": {
-                          "i128": "0"
+                          "i128": "100"
                         }
                       },
                       {
@@ -1037,7 +1013,7 @@
                           "symbol": "total_received"
                         },
                         "val": {
-                          "i128": "190"
+                          "i128": "95"
                         }
                       }
                     ]
@@ -1097,7 +1073,7 @@
                           "symbol": "total_contributions"
                         },
                         "val": {
-                          "i128": "0"
+                          "i128": "100"
                         }
                       },
                       {
@@ -1105,7 +1081,7 @@
                           "symbol": "total_received"
                         },
                         "val": {
-                          "i128": "0"
+                          "i128": "95"
                         }
                       }
                     ]
@@ -1194,7 +1170,7 @@
                           "symbol": "amount"
                         },
                         "val": {
-                          "i128": "190"
+                          "i128": "95"
                         }
                       },
                       {
@@ -1238,120 +1214,58 @@
                         }
                       }
                     ]
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "RoundConfigSnapshot"
                   },
                   {
-                    "u32": 0
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bytes": "0bdc73bc55c26504efd4668c137bdaff6dde4bda1c45f11a6a223665ac3c4e0f"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "RoundConfigSnapshot"
-                  },
-                  {
-                    "u32": 1
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "bytes": "0bdc73bc55c26504efd4668c137bdaff6dde4bda1c45f11a6a223665ac3c4e0f"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "RoundFeeLedger"
-                  },
-                  {
-                    "u32": 0
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "late_penalty_fee"
-                    },
-                    "val": {
-                      "i128": "0"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "payout_fee"
-                    },
-                    "val": {
-                      "i128": "10"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "round"
-                    },
-                    "val": {
-                      "u32": 0
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_fee"
-                    },
-                    "val": {
-                      "i128": "10"
-                    }
+                    "map": [
+                      {
+                        "key": {
+                          "symbol": "amount"
+                        },
+                        "val": {
+                          "i128": "95"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "fee"
+                        },
+                        "val": {
+                          "i128": "0"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "payout_type"
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "recipient"
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "round"
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "timestamp"
+                        },
+                        "val": {
+                          "u64": "60"
+                        }
+                      }
+                    ]
                   }
                 ]
               }
@@ -1431,103 +1345,6 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Streaks"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "vec": [
-                  {
-                    "map": [
-                      {
-                        "key": {
-                          "symbol": "current_streak"
-                        },
-                        "val": {
-                          "u32": 1
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "last_round"
-                        },
-                        "val": {
-                          "u32": 0
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "longest_streak"
-                        },
-                        "val": {
-                          "u32": 1
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "member"
-                        },
-                        "val": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                        }
-                      }
-                    ]
-                  },
-                  {
-                    "map": [
-                      {
-                        "key": {
-                          "symbol": "current_streak"
-                        },
-                        "val": {
-                          "u32": 1
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "last_round"
-                        },
-                        "val": {
-                          "u32": 0
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "longest_streak"
-                        },
-                        "val": {
-                          "u32": 1
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "member"
-                        },
-                        "val": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
-              "key": {
-                "vec": [
-                  {
                     "symbol": "Votes"
                   }
                 ]
@@ -1563,14 +1380,6 @@
                       },
                       "val": {
                         "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "vrf_ownr"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                       }
                     },
                     {
@@ -1661,14 +1470,6 @@
                           },
                           {
                             "key": {
-                              "symbol": "health_score"
-                            },
-                            "val": {
-                              "u32": 1
-                            }
-                          },
-                          {
-                            "key": {
                               "symbol": "id"
                             },
                             "val": {
@@ -1728,7 +1529,7 @@
                               "symbol": "payout_bitmap"
                             },
                             "val": {
-                              "u128": "1"
+                              "u128": "0"
                             }
                           },
                           {
@@ -1850,26 +1651,6 @@
           "ext": "v0"
         },
         "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "3126073502131104533"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
       },
       {
         "entry": {
@@ -2225,7 +2006,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "190"
+                      "i128": "95"
                     }
                   },
                   {
@@ -2277,7 +2058,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "0"
+                      "i128": "95"
                     }
                   },
                   {

@@ -1,4 +1,3 @@
-
 use soroban_sdk::{contracttype, Address, String};
 
 #[contracttype]
@@ -31,7 +30,13 @@ pub struct ErrorEnvelope {
 }
 
 impl ErrorEnvelope {
-    pub fn new(env: &soroban_sdk::Env, code: u32, message: &str, details: &str, request_id: u64) -> Self {
+    pub fn new(
+        env: &soroban_sdk::Env,
+        code: u32,
+        message: &str,
+        details: &str,
+        request_id: u64,
+    ) -> Self {
         Self {
             code,
             message: String::from_str(env, message),
@@ -40,4 +45,3 @@ impl ErrorEnvelope {
         }
     }
 }
-

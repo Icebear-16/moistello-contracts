@@ -1,7 +1,5 @@
 // src/contracts/circle.rs
-use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Env,
-};
+use soroban_sdk::{contract, contracterror, contractimpl, contracttype, token, Address, Env};
 
 #[contracterror]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,11 +78,7 @@ impl CircleContract {
     }
 
     pub fn calculate_payout_fee(env: Env, contribution_amount: i128) -> Result<i128, CircleError> {
-        let fee_bps: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::FeeBps)
-            .unwrap_or(0);
+        let fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
 
         if contribution_amount <= 0 || fee_bps == 0 {
             return Ok(0);
@@ -165,11 +159,7 @@ impl CircleContract {
         }
 
         let token_client = token::Client::new(&env, &config.token);
-        token_client.transfer(
-            &member,
-            &env.current_contract_address(),
-            &config.collateral_amount,
-        );
+        token_client.transfer(&member, &env.current_contract_address(), &config.collateral_amount);
 
         env.storage()
             .persistent()
@@ -223,10 +213,8 @@ impl CircleContract {
         let token_client = token::Client::new(&env, &config.token);
         token_client.transfer(&env.current_contract_address(), &treasury, &collateral);
 
-        env.events().publish(
-            (soroban_sdk::Symbol::new(&env, "CollateralSlashed"), member),
-            collateral,
-        );
+        env.events()
+            .publish((soroban_sdk::Symbol::new(&env, "CollateralSlashed"), member), collateral);
         Ok(())
     }
 
@@ -266,10 +254,8 @@ impl CircleContract {
         let token_client = token::Client::new(&env, &config.token);
         token_client.transfer(&env.current_contract_address(), &member, &collateral);
 
-        env.events().publish(
-            (soroban_sdk::Symbol::new(&env, "CollateralRefunded"), member),
-            collateral,
-        );
+        env.events()
+            .publish((soroban_sdk::Symbol::new(&env, "CollateralRefunded"), member), collateral);
         Ok(())
     }
 
@@ -331,7 +317,9 @@ mod tests {
         let contract_id = env.register(CircleContract, ());
         let client = CircleContractClient::new(&env, &contract_id);
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         let config = CircleConfig {
             token,
             base_amount: 1000,
@@ -391,7 +379,9 @@ mod tests {
         let contract_id = env.register(CircleContract, ());
         let client = CircleContractClient::new(&env, &contract_id);
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         let config = CircleConfig {
             token,
             base_amount: 1000,

@@ -11,7 +11,7 @@ fn mint_tokens(env: &Env, token: &Address, recipient: &Address, amount: i128) {
 }
 
 fn setup(env: &Env) -> (TreasuryClient<'static>, Address, Address) {
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
     let contract_id = env.register(Treasury, ());
     let client = TreasuryClient::new(env, &contract_id);
     let admin = Address::generate(env);
@@ -26,7 +26,7 @@ fn setup(env: &Env) -> (TreasuryClient<'static>, Address, Address) {
 #[test]
 fn test_init_sets_admin_and_zero_balance() {
     let env = Env::default();
-    env.mock_all_auths();
+    env.mock_all_auths_allowing_non_root_auth();
     let contract_id = env.register(Treasury, ());
     let client = TreasuryClient::new(&env, &contract_id);
     let admin = Address::generate(&env);

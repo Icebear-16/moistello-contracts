@@ -4,6 +4,7 @@ mod contract;
 mod test;
 mod types;
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
+
 #[contract]
 pub struct Governance;
 #[contractimpl]
@@ -44,6 +45,9 @@ impl Governance {
         proposal_id: u64,
     ) -> Result<(), types::GovernanceError> {
         contract::cancel_proposal(&env, &caller, proposal_id)
+    }
+    pub fn expire_proposal(env: Env, proposal_id: u64) -> Result<(), types::GovernanceError> {
+        contract::expire_proposal(&env, proposal_id)
     }
     pub fn queue_config_update(
         env: Env,
@@ -110,12 +114,6 @@ impl Governance {
     pub fn revoke_delegation(env: Env, delegator: Address) -> Result<(), types::GovernanceError> {
         contract::revoke_delegation(&env, &delegator)
     }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_smoke_compile() {
-        assert!(true);
+    pub fn get_deposit(env: Env, id: u64) -> Option<i128> {
+        contract::get_deposit(&env, id)
     }
-}

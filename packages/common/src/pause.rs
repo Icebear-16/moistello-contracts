@@ -1,4 +1,4 @@
-use soroban_sdk::{contractevent, contracterror, symbol_short, Address, Env};
+use soroban_sdk::{contracterror, contractevent, symbol_short, Address, Env};
 
 #[contracterror]
 #[derive(Debug)]

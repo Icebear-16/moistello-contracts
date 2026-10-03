@@ -1,5 +1,5 @@
 //! Centralized token transfer helper with error mapping
-//! 
+//!
 //! Issue #517: All token transfers across contracts should use this helper
 //! to ensure consistent error handling and never silently succeed.
 
@@ -17,23 +17,23 @@ pub enum TokenTransferError {
 }
 
 /// Safely transfer tokens with explicit error handling
-/// 
+///
 /// This helper ensures that:
 /// - All token transfers are explicit and never silent
 /// - Failures are always surfaced as typed errors
 /// - Balance checks are consistent across contracts
-/// 
+///
 /// # Arguments
 /// * `env` - The contract environment
 /// * `token` - The token contract address
 /// * `from` - The source address
 /// * `to` - The destination address  
 /// * `amount` - The amount to transfer
-/// 
+///
 /// # Returns
 /// * `Ok(())` on successful transfer
 /// * `Err(TokenTransferError)` on any failure
-/// 
+///
 /// # Panics
 /// Never panics - all failures are returned as errors
 pub fn safe_transfer(

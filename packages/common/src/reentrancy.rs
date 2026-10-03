@@ -1,4 +1,4 @@
-use soroban_sdk::{Env, Symbol, contracterror, symbol_short};
+use soroban_sdk::{contracterror, symbol_short, Env, Symbol};
 
 const REENTRANCY_KEY: Symbol = symbol_short!("reent");
 
@@ -44,7 +44,11 @@ pub struct ReentrancyGuard {
 impl ReentrancyGuard {
     /// Acquires the reentrancy lock. Returns an error if already locked.
     pub fn new(env: &Env) -> Result<Self, ReentrancyError> {
-        let locked: bool = env.storage().temporary().get(&REENTRANCY_KEY).unwrap_or(false);
+        let locked: bool = env
+            .storage()
+            .temporary()
+            .get(&REENTRANCY_KEY)
+            .unwrap_or(false);
         if locked {
             return Err(ReentrancyError::ReentrantCall);
         }

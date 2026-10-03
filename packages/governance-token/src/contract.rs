@@ -1,5 +1,5 @@
-use soroban_sdk::{symbol_short, Address, Env, Map, String};
 use crate::types::*;
+use soroban_sdk::{symbol_short, Address, Env, Map, String};
 
 const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("admin");
 const META_KEY: soroban_sdk::Symbol = symbol_short!("meta");
@@ -21,15 +21,24 @@ pub fn initialize(
         return Err(TokenError::NotInitialized);
     }
     env.storage().instance().set(&ADMIN_KEY, admin);
-    env.storage().instance().set(&META_KEY, &TokenMetadata {
-        name: name.clone(),
-        symbol: symbol.clone(),
-        decimals,
-    });
+    env.storage().instance().set(
+        &META_KEY,
+        &TokenMetadata {
+            name: name.clone(),
+            symbol: symbol.clone(),
+            decimals,
+        },
+    );
     env.storage().instance().set(&TOTAL_KEY, &0i128);
-    env.storage().persistent().set(&BALANCES_KEY, &Map::<Address, i128>::new(env));
-    env.storage().persistent().set(&ALLOWANCES_KEY, &Map::<(Address, Address), AllowanceData>::new(env));
-    env.storage().persistent().set(&FROZEN_KEY, &Map::<Address, bool>::new(env));
+    env.storage()
+        .persistent()
+        .set(&BALANCES_KEY, &Map::<Address, i128>::new(env));
+    env.storage()
+        .persistent()
+        .set(&ALLOWANCES_KEY, &Map::<(Address, Address), AllowanceData>::new(env));
+    env.storage()
+        .persistent()
+        .set(&FROZEN_KEY, &Map::<Address, bool>::new(env));
     Ok(())
 }
 
@@ -44,16 +53,30 @@ pub fn transfer(env: &Env, from: &Address, to: &Address, amount: i128) -> Result
     if amount <= 0 {
         return Err(TokenError::InvalidAmount);
     }
-    let mut balances: Map<Address, i128> = env.storage().persistent().get(&BALANCES_KEY).ok_or(TokenError::NotInitialized)?;
+    let mut balances: Map<Address, i128> = env
+        .storage()
+        .persistent()
+        .get(&BALANCES_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     let from_balance: i128 = balances.get(from.clone()).unwrap_or(0);
     if from_balance < amount {
         return Err(TokenError::InsufficientBalance);
     }
-    balances.set(from.clone(), from_balance.checked_sub(amount).ok_or(TokenError::Underflow)?);
+    balances.set(
+        from.clone(),
+        from_balance
+            .checked_sub(amount)
+            .ok_or(TokenError::Underflow)?,
+    );
     let to_balance: i128 = balances.get(to.clone()).unwrap_or(0);
     balances.set(to.clone(), to_balance.checked_add(amount).ok_or(TokenError::Overflow)?);
     env.storage().persistent().set(&BALANCES_KEY, &balances);
-    Transfer { from: from.clone(), to: to.clone(), amount }.publish(env);
+    Transfer {
+        from: from.clone(),
+        to: to.clone(),
+        amount,
+    }
+    .publish(env);
     Ok(())
 }
 
@@ -74,9 +97,15 @@ pub fn transfer_from(
     if amount <= 0 {
         return Err(TokenError::InvalidAmount);
     }
-    let allowances: Map<(Address, Address), AllowanceData> = env.storage().persistent().get(&ALLOWANCES_KEY).ok_or(TokenError::NotInitialized)?;
+    let allowances: Map<(Address, Address), AllowanceData> = env
+        .storage()
+        .persistent()
+        .get(&ALLOWANCES_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     let key = (from.clone(), spender.clone());
-    let allowance: AllowanceData = allowances.get(key.clone()).ok_or(TokenError::Unauthorized)?;
+    let allowance: AllowanceData = allowances
+        .get(key.clone())
+        .ok_or(TokenError::Unauthorized)?;
     let current_ledger: u32 = env.ledger().sequence();
     if allowance.expiration_ledger != 0 && current_ledger > allowance.expiration_ledger {
         return Err(TokenError::AllowanceExpired);
@@ -85,22 +114,44 @@ pub fn transfer_from(
         return Err(TokenError::AllowanceExceeded);
     }
     let mut allowances_mut = allowances;
-    let new_allowance = allowance.amount.checked_sub(amount).ok_or(TokenError::Underflow)?;
-    allowances_mut.set(key, AllowanceData {
-        amount: new_allowance,
-        expiration_ledger: allowance.expiration_ledger,
-    });
-    env.storage().persistent().set(&ALLOWANCES_KEY, &allowances_mut);
-    let mut balances: Map<Address, i128> = env.storage().persistent().get(&BALANCES_KEY).ok_or(TokenError::NotInitialized)?;
+    let new_allowance = allowance
+        .amount
+        .checked_sub(amount)
+        .ok_or(TokenError::Underflow)?;
+    allowances_mut.set(
+        key,
+        AllowanceData {
+            amount: new_allowance,
+            expiration_ledger: allowance.expiration_ledger,
+        },
+    );
+    env.storage()
+        .persistent()
+        .set(&ALLOWANCES_KEY, &allowances_mut);
+    let mut balances: Map<Address, i128> = env
+        .storage()
+        .persistent()
+        .get(&BALANCES_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     let from_balance: i128 = balances.get(from.clone()).unwrap_or(0);
     if from_balance < amount {
         return Err(TokenError::InsufficientBalance);
     }
-    balances.set(from.clone(), from_balance.checked_sub(amount).ok_or(TokenError::Underflow)?);
+    balances.set(
+        from.clone(),
+        from_balance
+            .checked_sub(amount)
+            .ok_or(TokenError::Underflow)?,
+    );
     let to_balance: i128 = balances.get(to.clone()).unwrap_or(0);
     balances.set(to.clone(), to_balance.checked_add(amount).ok_or(TokenError::Overflow)?);
     env.storage().persistent().set(&BALANCES_KEY, &balances);
-    Transfer { from: from.clone(), to: to.clone(), amount }.publish(env);
+    Transfer {
+        from: from.clone(),
+        to: to.clone(),
+        amount,
+    }
+    .publish(env);
     Ok(())
 }
 
@@ -120,23 +171,50 @@ pub fn approve(
     if amount == 0 && expiration_ledger > 0 {
         return Err(TokenError::InvalidAmount);
     }
-    let mut allowances: Map<(Address, Address), AllowanceData> = env.storage().persistent().get(&ALLOWANCES_KEY).ok_or(TokenError::NotInitialized)?;
+    let mut allowances: Map<(Address, Address), AllowanceData> = env
+        .storage()
+        .persistent()
+        .get(&ALLOWANCES_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     let key = (owner.clone(), spender.clone());
-    allowances.set(key, AllowanceData { amount, expiration_ledger });
+    allowances.set(
+        key,
+        AllowanceData {
+            amount,
+            expiration_ledger,
+        },
+    );
     env.storage().persistent().set(&ALLOWANCES_KEY, &allowances);
-    Approve { owner: owner.clone(), spender: spender.clone(), amount, expiration_ledger }.publish(env);
+    Approve {
+        owner: owner.clone(),
+        spender: spender.clone(),
+        amount,
+        expiration_ledger,
+    }
+    .publish(env);
     Ok(())
 }
 
 pub fn balance(env: &Env, account: &Address) -> i128 {
-    let balances: Map<Address, i128> = env.storage().persistent().get(&BALANCES_KEY).unwrap_or_else(|| Map::new(env));
+    let balances: Map<Address, i128> = env
+        .storage()
+        .persistent()
+        .get(&BALANCES_KEY)
+        .unwrap_or_else(|| Map::new(env));
     balances.get(account.clone()).unwrap_or(0)
 }
 
 pub fn allowance(env: &Env, owner: &Address, spender: &Address) -> AllowanceData {
-    let allowances: Map<(Address, Address), AllowanceData> = env.storage().persistent().get(&ALLOWANCES_KEY).unwrap_or_else(|| Map::new(env));
+    let allowances: Map<(Address, Address), AllowanceData> = env
+        .storage()
+        .persistent()
+        .get(&ALLOWANCES_KEY)
+        .unwrap_or_else(|| Map::new(env));
     let key = (owner.clone(), spender.clone());
-    allowances.get(key).unwrap_or(AllowanceData { amount: 0, expiration_ledger: 0 })
+    allowances.get(key).unwrap_or(AllowanceData {
+        amount: 0,
+        expiration_ledger: 0,
+    })
 }
 
 pub fn total_supply(env: &Env) -> i128 {
@@ -144,29 +222,41 @@ pub fn total_supply(env: &Env) -> i128 {
 }
 
 pub fn name(env: &Env) -> String {
-    let meta: TokenMetadata = env.storage().instance().get(&META_KEY).unwrap_or(TokenMetadata {
-        name: String::from_str(env, ""),
-        symbol: String::from_str(env, ""),
-        decimals: 0,
-    });
+    let meta: TokenMetadata = env
+        .storage()
+        .instance()
+        .get(&META_KEY)
+        .unwrap_or(TokenMetadata {
+            name: String::from_str(env, ""),
+            symbol: String::from_str(env, ""),
+            decimals: 0,
+        });
     meta.name
 }
 
 pub fn symbol(env: &Env) -> String {
-    let meta: TokenMetadata = env.storage().instance().get(&META_KEY).unwrap_or(TokenMetadata {
-        name: String::from_str(env, ""),
-        symbol: String::from_str(env, ""),
-        decimals: 0,
-    });
+    let meta: TokenMetadata = env
+        .storage()
+        .instance()
+        .get(&META_KEY)
+        .unwrap_or(TokenMetadata {
+            name: String::from_str(env, ""),
+            symbol: String::from_str(env, ""),
+            decimals: 0,
+        });
     meta.symbol
 }
 
 pub fn decimals(env: &Env) -> u32 {
-    let meta: TokenMetadata = env.storage().instance().get(&META_KEY).unwrap_or(TokenMetadata {
-        name: String::from_str(env, ""),
-        symbol: String::from_str(env, ""),
-        decimals: 0,
-    });
+    let meta: TokenMetadata = env
+        .storage()
+        .instance()
+        .get(&META_KEY)
+        .unwrap_or(TokenMetadata {
+            name: String::from_str(env, ""),
+            symbol: String::from_str(env, ""),
+            decimals: 0,
+        });
     meta.decimals
 }
 
@@ -180,13 +270,23 @@ pub fn mint(env: &Env, admin: &Address, to: &Address, amount: i128) -> Result<()
     if amount <= 0 {
         return Err(TokenError::InvalidAmount);
     }
-    let mut balances: Map<Address, i128> = env.storage().persistent().get(&BALANCES_KEY).ok_or(TokenError::NotInitialized)?;
+    let mut balances: Map<Address, i128> = env
+        .storage()
+        .persistent()
+        .get(&BALANCES_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     let current: i128 = balances.get(to.clone()).unwrap_or(0);
     balances.set(to.clone(), current.checked_add(amount).ok_or(TokenError::Overflow)?);
     env.storage().persistent().set(&BALANCES_KEY, &balances);
     let total: i128 = env.storage().instance().get(&TOTAL_KEY).unwrap_or(0);
-    env.storage().instance().set(&TOTAL_KEY, &total.checked_add(amount).ok_or(TokenError::Overflow)?);
-    Mint { to: to.clone(), amount }.publish(env);
+    env.storage()
+        .instance()
+        .set(&TOTAL_KEY, &total.checked_add(amount).ok_or(TokenError::Overflow)?);
+    Mint {
+        to: to.clone(),
+        amount,
+    }
+    .publish(env);
     Ok(())
 }
 
@@ -196,7 +296,11 @@ pub fn burn(env: &Env, from: &Address, amount: i128) -> Result<(), TokenError> {
     if amount <= 0 {
         return Err(TokenError::InvalidAmount);
     }
-    let mut balances: Map<Address, i128> = env.storage().persistent().get(&BALANCES_KEY).ok_or(TokenError::NotInitialized)?;
+    let mut balances: Map<Address, i128> = env
+        .storage()
+        .persistent()
+        .get(&BALANCES_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     let current: i128 = balances.get(from.clone()).unwrap_or(0);
     if current < amount {
         return Err(TokenError::InsufficientBalance);
@@ -204,11 +308,23 @@ pub fn burn(env: &Env, from: &Address, amount: i128) -> Result<(), TokenError> {
     balances.set(from.clone(), current.checked_sub(amount).ok_or(TokenError::Underflow)?);
     env.storage().persistent().set(&BALANCES_KEY, &balances);
     let total: i128 = env.storage().instance().get(&TOTAL_KEY).unwrap_or(0);
-    env.storage().instance().set(&TOTAL_KEY, &total.checked_sub(amount).ok_or(TokenError::Underflow)?);
-    Burn { from: from.clone(), amount }.publish(env);
+    env.storage()
+        .instance()
+        .set(&TOTAL_KEY, &total.checked_sub(amount).ok_or(TokenError::Underflow)?);
+    Burn {
+        from: from.clone(),
+        amount,
+    }
+    .publish(env);
     Ok(())
 }
 
+pub fn clawback(
+    env: &Env,
+    admin: &Address,
+    from: &Address,
+    amount: i128,
+) -> Result<(), TokenError> {
 /// #518 — Admin-authorized burn (distinct from holder burn).
 ///
 /// Allows admin to burn tokens from any account. Emits `Burn` event.
@@ -252,7 +368,11 @@ pub fn clawback(env: &Env, admin: &Address, from: &Address, amount: i128) -> Res
     if amount <= 0 {
         return Err(TokenError::InvalidAmount);
     }
-    let mut balances: Map<Address, i128> = env.storage().persistent().get(&BALANCES_KEY).ok_or(TokenError::NotInitialized)?;
+    let mut balances: Map<Address, i128> = env
+        .storage()
+        .persistent()
+        .get(&BALANCES_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     let current: i128 = balances.get(from.clone()).unwrap_or(0);
     if current < amount {
         return Err(TokenError::InsufficientBalance);
@@ -260,33 +380,57 @@ pub fn clawback(env: &Env, admin: &Address, from: &Address, amount: i128) -> Res
     balances.set(from.clone(), current.checked_sub(amount).ok_or(TokenError::Underflow)?);
     env.storage().persistent().set(&BALANCES_KEY, &balances);
     let total: i128 = env.storage().instance().get(&TOTAL_KEY).unwrap_or(0);
-    env.storage().instance().set(&TOTAL_KEY, &total.checked_sub(amount).ok_or(TokenError::Underflow)?);
-    Clawback { from: from.clone(), amount }.publish(env);
+    env.storage()
+        .instance()
+        .set(&TOTAL_KEY, &total.checked_sub(amount).ok_or(TokenError::Underflow)?);
+    Clawback {
+        from: from.clone(),
+        amount,
+    }
+    .publish(env);
     Ok(())
 }
 
 pub fn freeze(env: &Env, admin: &Address, account: &Address) -> Result<(), TokenError> {
     admin.require_auth();
     require_admin(env, admin)?;
-    let mut frozen: Map<Address, bool> = env.storage().persistent().get(&FROZEN_KEY).ok_or(TokenError::NotInitialized)?;
+    let mut frozen: Map<Address, bool> = env
+        .storage()
+        .persistent()
+        .get(&FROZEN_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     frozen.set(account.clone(), true);
     env.storage().persistent().set(&FROZEN_KEY, &frozen);
-    AccountFrozen { account: account.clone() }.publish(env);
+    AccountFrozen {
+        account: account.clone(),
+    }
+    .publish(env);
     Ok(())
 }
 
 pub fn unfreeze(env: &Env, admin: &Address, account: &Address) -> Result<(), TokenError> {
     admin.require_auth();
     require_admin(env, admin)?;
-    let mut frozen: Map<Address, bool> = env.storage().persistent().get(&FROZEN_KEY).ok_or(TokenError::NotInitialized)?;
+    let mut frozen: Map<Address, bool> = env
+        .storage()
+        .persistent()
+        .get(&FROZEN_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     frozen.set(account.clone(), false);
     env.storage().persistent().set(&FROZEN_KEY, &frozen);
-    AccountUnfrozen { account: account.clone() }.publish(env);
+    AccountUnfrozen {
+        account: account.clone(),
+    }
+    .publish(env);
     Ok(())
 }
 
 pub fn is_frozen(env: &Env, account: &Address) -> bool {
-    let frozen: Map<Address, bool> = env.storage().persistent().get(&FROZEN_KEY).unwrap_or_else(|| Map::new(env));
+    let frozen: Map<Address, bool> = env
+        .storage()
+        .persistent()
+        .get(&FROZEN_KEY)
+        .unwrap_or_else(|| Map::new(env));
     frozen.get(account.clone()).unwrap_or(false)
 }
 
@@ -298,11 +442,18 @@ pub fn set_admin(env: &Env, admin: &Address, new_admin: &Address) -> Result<(), 
 }
 
 pub fn get_admin(env: &Env) -> Result<Address, TokenError> {
-    env.storage().instance().get(&ADMIN_KEY).ok_or(TokenError::NotInitialized)
+    env.storage()
+        .instance()
+        .get(&ADMIN_KEY)
+        .ok_or(TokenError::NotInitialized)
 }
 
 fn require_admin(env: &Env, caller: &Address) -> Result<(), TokenError> {
-    let stored: Address = env.storage().instance().get(&ADMIN_KEY).ok_or(TokenError::NotInitialized)?;
+    let stored: Address = env
+        .storage()
+        .instance()
+        .get(&ADMIN_KEY)
+        .ok_or(TokenError::NotInitialized)?;
     if caller != &stored {
         return Err(TokenError::Unauthorized);
     }
@@ -335,7 +486,10 @@ pub fn set_allowlist_mode(env: &Env, admin: &Address, enabled: bool) -> Result<(
 /// Returns whether allowlist mode is currently enabled. Defaults to `false`
 /// when never toggled.
 pub fn is_allowlist_mode_enabled(env: &Env) -> bool {
-    env.storage().instance().get(&ALLOWLIST_MODE_KEY).unwrap_or(false)
+    env.storage()
+        .instance()
+        .get(&ALLOWLIST_MODE_KEY)
+        .unwrap_or(false)
 }
 
 /// Add `account` to the recipient allowlist (admin-only). Emits `AllowlistAdded`.
@@ -345,10 +499,17 @@ pub fn is_allowlist_mode_enabled(env: &Env) -> bool {
 pub fn add_to_allowlist(env: &Env, admin: &Address, account: &Address) -> Result<(), TokenError> {
     admin.require_auth();
     require_admin(env, admin)?;
-    let mut list: Map<Address, bool> = env.storage().persistent().get(&ALLOWLIST_KEY).unwrap_or_else(|| Map::new(env));
+    let mut list: Map<Address, bool> = env
+        .storage()
+        .persistent()
+        .get(&ALLOWLIST_KEY)
+        .unwrap_or_else(|| Map::new(env));
     list.set(account.clone(), true);
     env.storage().persistent().set(&ALLOWLIST_KEY, &list);
-    AllowlistAdded { account: account.clone() }.publish(env);
+    AllowlistAdded {
+        account: account.clone(),
+    }
+    .publish(env);
     Ok(())
 }
 
@@ -356,19 +517,34 @@ pub fn add_to_allowlist(env: &Env, admin: &Address, account: &Address) -> Result
 ///
 /// # Authorization
 /// Requires `admin.require_auth()` and `admin` must be the stored admin.
-pub fn remove_from_allowlist(env: &Env, admin: &Address, account: &Address) -> Result<(), TokenError> {
+pub fn remove_from_allowlist(
+    env: &Env,
+    admin: &Address,
+    account: &Address,
+) -> Result<(), TokenError> {
     admin.require_auth();
     require_admin(env, admin)?;
-    let mut list: Map<Address, bool> = env.storage().persistent().get(&ALLOWLIST_KEY).unwrap_or_else(|| Map::new(env));
+    let mut list: Map<Address, bool> = env
+        .storage()
+        .persistent()
+        .get(&ALLOWLIST_KEY)
+        .unwrap_or_else(|| Map::new(env));
     list.set(account.clone(), false);
     env.storage().persistent().set(&ALLOWLIST_KEY, &list);
-    AllowlistRemoved { account: account.clone() }.publish(env);
+    AllowlistRemoved {
+        account: account.clone(),
+    }
+    .publish(env);
     Ok(())
 }
 
 /// Returns whether `account` is currently on the recipient allowlist.
 pub fn is_allowlisted(env: &Env, account: &Address) -> bool {
-    let list: Map<Address, bool> = env.storage().persistent().get(&ALLOWLIST_KEY).unwrap_or_else(|| Map::new(env));
+    let list: Map<Address, bool> = env
+        .storage()
+        .persistent()
+        .get(&ALLOWLIST_KEY)
+        .unwrap_or_else(|| Map::new(env));
     list.get(account.clone()).unwrap_or(false)
 }
 

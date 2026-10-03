@@ -35,6 +35,13 @@ pub fn resolve_random(env: &Env, circle: &Circle, round: u32) -> Result<Address,
             }
         }
     }
+    for pos in 0..circle.max_members {
+        if (circle.payout_bitmap & (1u128 << pos)) == 0 {
+            if let Some(addr) = pos_to_addr.get(pos) {
+                return Ok(addr);
+            }
+        }
+    }
     for i in 0..members.len() {
         let m = members.get(i).ok_or(CircleError::VecAccessError)?;
         if m.status == MEMBER_ACTIVE && (circle.payout_bitmap & (1u128 << m.position)) == 0 {
@@ -92,6 +99,9 @@ pub fn resolve_auction(
     for i in 0..members.len() {
         let m = members.get(i).ok_or(CircleError::VecAccessError)?;
         if m.address == winner_bid.bidder {
+            if (circle.payout_bitmap & (1u128 << m.position)) != 0 {
+                return Err(CircleError::PayoutAlreadyExecuted);
+            }
             ensure_active_unpaid_member(circle, &m)?;
             return Ok((winner_bid.bidder, winner_bid.discount_bips));
         }
@@ -135,10 +145,22 @@ pub fn resolve_vote(env: &Env, circle: &Circle, round: u32) -> Result<Address, C
             best_addr = Some(addr);
         }
     }
+    }
+    let mut best_addr: Option<Address> = None;
+    let mut best_count: u32 = 0;
+    for (addr, count) in tally.iter() {
+        if count > best_count {
+            best_count = count;
+            best_addr = Some(addr);
+        }
+    }
     let winner = best_addr.ok_or(CircleError::VoteQuorumNotMet)?;
     for i in 0..members.len() {
         let m = members.get(i).ok_or(CircleError::VecAccessError)?;
         if m.address == winner {
+            if (circle.payout_bitmap & (1u128 << m.position)) != 0 {
+                return Err(CircleError::PayoutAlreadyExecuted);
+            }
             ensure_active_unpaid_member(circle, &m)?;
             return Ok(winner);
         }

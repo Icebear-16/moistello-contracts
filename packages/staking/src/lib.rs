@@ -42,12 +42,6 @@ impl Staking {
         contract::get_stake(&env, &user)
     }
 
-    /// Query path for unlock eligibility. Uses the same inclusive boundary
-    /// as `unstake` (`now >= unlock_time`).
-    pub fn is_stake_unlocked(env: Env, user: Address) -> bool {
-        contract::is_stake_unlocked(&env, &user)
-    }
-
     pub fn get_unbonding(env: Env, user: Address) -> Option<types::UnbondingPosition> {
         contract::get_unbonding(&env, &user)
     }
@@ -69,16 +63,6 @@ impl Staking {
         contract::get_all_stakers(&env)
     }
 
-    /// #445 — Return a page of active stakers for indexer sync.
-    ///
-    /// `cursor` is the zero-based start index; `limit` is capped at
-    /// `MAX_STAKERS_PAGE_SIZE` (50).  Each entry carries the staker's address
-    /// and their current staked token amount.  When `page.next_cursor == page.total`
-    /// the list is exhausted.
-    pub fn query_stakers_page(env: Env, cursor: u32, limit: u32) -> types::StakersPage {
-        contract::query_stakers_page(&env, cursor, limit)
-    }
-
     pub fn pause(env: Env, admin: Address) -> Result<(), types::StakingError> {
         contract::pause(&env, &admin)
     }
@@ -91,6 +75,34 @@ impl Staking {
         contract::update_admin(&env, &current_admin, &new_admin)
     }
 
+    pub fn top_up(env: Env, user: Address, amount: i128) -> Result<(), types::StakingError> {
+        contract::top_up(&env, &user, amount)
+    }
+
+    pub fn get_time_weighted_amount(env: Env, user: Address) -> i128 {
+        contract::get_time_weighted_amount(&env, &user)
+    pub fn get_slash_notice_period(env: Env) -> u64 {
+        contract::get_slash_notice_period(&env)
+    }
+
+    pub fn set_slash_notice_period(env: Env, admin: Address, period_seconds: u64) -> Result<(), types::StakingError> {
+        contract::set_slash_notice_period(&env, &admin, period_seconds)
+    }
+
+    pub fn get_slash_notice(env: Env, user: Address) -> Option<(i128, u64, Address)> {
+        contract::get_slash_notice(&env, &user)
+    }
+
+    pub fn slash(env: Env, admin: Address, user: Address, amount: i128) -> Result<(), types::StakingError> {
+        contract::slash(&env, &admin, &user, amount)
+    }
+
+    pub fn cancel_slash(env: Env, admin: Address, user: Address) -> Result<(), types::StakingError> {
+        contract::cancel_slash(&env, &admin, &user)
+    }
+
+    pub fn execute_slash(env: Env, admin: Address, user: Address) -> Result<(), types::StakingError> {
+        contract::execute_slash(&env, &admin, &user)
     /// #523 — Slash a staker's collateral proportional to shortfall.
     /// Returns the actual amount slashed (min of shortfall and stake).
     pub fn slash(

@@ -32,7 +32,7 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
-        target: wasm32-unknown-unknown
+        target: wasm32v1-none
         components: rustfmt, clippy
     - name: Format Check
       run: cargo fmt -- --check
@@ -60,10 +60,10 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
-        targets: wasm32-unknown-unknown
+        targets: wasm32v1-none
     - name: Build contracts (WASM release)
-      run: cargo build --target wasm32-unknown-unknown --release --workspace
+      run: cargo build --target wasm32v1-none --release --workspace
     - name: Check WASM size budgets
       run: |
         chmod +x scripts/check-wasm-size.sh
-        ./scripts/check-wasm-size.sh target/wasm32-unknown-unknown/release
+        ./scripts/check-wasm-size.sh target/wasm32v1-none/release

@@ -37,7 +37,6 @@
 ///
 /// For enhanced security, the admin can sign VRF outputs off-chain and callers
 /// can verify via `verify_vrf()` before accepting the shuffled order.
-
 use soroban_sdk::{contracterror, contractevent, symbol_short, Address, Bytes, BytesN, Env, Vec};
 
 // ── Storage keys ──────────────────────────────────────────────────────────
@@ -136,7 +135,11 @@ pub struct VrfFulfilled {
 ///
 /// # Errors
 /// * `VrfError::AlreadyInitialized` if called more than once
-pub fn init_vrf(env: &Env, admin_key: Option<&BytesN<32>>, owner: &Address) -> Result<(), VrfError> {
+pub fn init_vrf(
+    env: &Env,
+    admin_key: Option<&BytesN<32>>,
+    owner: &Address,
+) -> Result<(), VrfError> {
     if env.storage().instance().has(&ADMIN_KEY) || env.storage().instance().has(&OWNER_KEY) {
         return Err(VrfError::AlreadyInitialized);
     }
@@ -190,7 +193,9 @@ pub fn propose_key_rotation(
         .checked_add(activation_delay_secs)
         .ok_or(VrfError::Overflow)?;
     env.storage().instance().set(&PENDING_KEY, new_key);
-    env.storage().instance().set(&PENDING_AT_KEY, &activation_time);
+    env.storage()
+        .instance()
+        .set(&PENDING_AT_KEY, &activation_time);
     VrfKeyRotationProposed {
         new_key: new_key.clone(),
         activation_time,

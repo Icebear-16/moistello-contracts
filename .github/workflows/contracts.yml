@@ -28,16 +28,17 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
       - name: Install Soroban CLI
-        run: cargo install --locked soroban-cli --features opt
+        # soroban-cli 28.1.0 requires rustc >= 1.93.0 (aligned with rust-toolchain.toml)
+        run: cargo install --locked soroban-cli --version 28.1.0 --features opt
 
       - name: Build contracts
-        run: cargo build --target wasm32-unknown-unknown --release
+        run: cargo build --target wasm32v1-none --release
 
       - name: Run tests
         run: cargo test --workspace

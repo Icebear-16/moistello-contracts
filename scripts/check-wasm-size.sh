@@ -6,7 +6,7 @@
 #
 # Arguments:
 #   WASM_DIR   Directory containing compiled WASM files.
-#              Defaults to: target/wasm32-unknown-unknown/release
+#              Defaults to: target/wasm32v1-none/release
 #
 # Exit codes:
 #   0  All contracts are within budget.
@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-WASM_DIR="${1:-target/wasm32-unknown-unknown/release}"
+WASM_DIR="${1:-target/wasm32v1-none/release}"
 
 # ─── Budget table (bytes) ────────────────────────────────────────────────────
 # Format: "wasm_filename:budget_bytes:label"

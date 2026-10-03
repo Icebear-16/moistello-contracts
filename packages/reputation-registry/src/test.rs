@@ -1,9 +1,12 @@
 #![cfg(test)]
 
+use crate::types::{
+    ReputationError, ACTIVITY_COMPLETE, ACTIVITY_CONTRIBUTE, ACTIVITY_DEFAULT, ACTIVITY_JOIN,
+    TIER_BRONZE, TIER_DIAMOND, TIER_GOLD, TIER_PLATINUM, TIER_SILVER,
+};
+use crate::{ReputationRegistry, ReputationRegistryClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
-use crate::{ReputationRegistry, ReputationRegistryClient};
-use crate::types::{ReputationError, ACTIVITY_JOIN, ACTIVITY_CONTRIBUTE, ACTIVITY_COMPLETE, ACTIVITY_DEFAULT, TIER_BRONZE, TIER_SILVER, TIER_GOLD, TIER_PLATINUM, TIER_DIAMOND};
 
 fn setup(env: &Env) -> (ReputationRegistryClient, Address) {
     env.mock_all_auths();
@@ -183,7 +186,9 @@ fn test_pause_blocks_record() {
     assert_eq!(result, Err(Ok(ReputationError::ContractPaused)));
 
     client.unpause_registry(&admin);
-    assert!(client.try_record_activity(&user, &ACTIVITY_JOIN, &100).is_ok());
+    assert!(client
+        .try_record_activity(&user, &ACTIVITY_JOIN, &100)
+        .is_ok());
 }
 
 #[test]
